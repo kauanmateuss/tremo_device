@@ -35,10 +35,17 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(tremo_device main.c )
+add_executable(tremo_device main.c 
+            src/matrix.c
+            src/ssd1306_i2c.c
+            src/display.c
+            src/mpu6050_i2c.c)
 
 pico_set_program_name(tremo_device "tremo_device")
 pico_set_program_version(tremo_device "0.1")
+
+# Generate PIO header
+pico_generate_pio_header(tremo_device ${CMAKE_CURRENT_LIST_DIR}/ws2818b.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(tremo_device 1)
@@ -51,11 +58,14 @@ target_link_libraries(tremo_device
 # Add the standard include files to the build
 target_include_directories(tremo_device PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
+        include
 )
 
 # Add any user requested libraries
 target_link_libraries(tremo_device 
-        
+        hardware_pio
+        hardware_i2c
+        hardware_clocks
         )
 
 pico_add_extra_outputs(tremo_device)

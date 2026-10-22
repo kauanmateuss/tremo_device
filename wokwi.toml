@@ -1,0 +1,4 @@
+[wokwi]
+version = 1
+firmware = 'build/tremo_device.uf2'
+elf = 'build/tremo_device.elf'
