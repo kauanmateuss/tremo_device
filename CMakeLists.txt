@@ -39,7 +39,8 @@ add_executable(tremo_device main.c
             src/matrix.c
             src/ssd1306_i2c.c
             src/display.c
-            src/mpu6050_i2c.c)
+            src/mpu6050_i2c.c
+            src/monitoring.c)
 
 pico_set_program_name(tremo_device "tremo_device")
 pico_set_program_version(tremo_device "0.1")

@@ -1,10 +1,12 @@
 # Tremo Device — base de periféricos
 
-Projeto em C com Pico SDK para a BitDogLab. A primeira tarefa implementada em `main.c` lê continuamente os dois MPUs e
+Projeto em C com Pico SDK para a BitDogLab. O módulo `monitoring.c` lê continuamente os dois MPUs e
 mostra os eixos do acelerômetro e do giroscópio no monitor USB e no OLED.
 
 ## Organização
 
+- `main.c`: inicialização, boas-vindas por 2 segundos e loop principal.
+- `monitoring.h` / `monitoring.c`: aquisição, conversões, saída e recuperação dos sensores.
 - `matrix.h` / `matrix.c`: buffer e envio para os 25 LEDs no GPIO 7.
 - `display.h` / `display.c`: interface simples de texto para o OLED 128×64.
 - `ssd1306.h`, `ssd1306_i2c.h` / `ssd1306_i2c.c`: driver do OLED.
@@ -26,8 +28,10 @@ de usar: a configuração de software não altera o endereço do sensor.
 
 ## Monitoramento contínuo
 
-A lógica da aplicação está em `main.c`, com pequenas funções auxiliares no mesmo
-arquivo para inicialização, aquisição, saída serial e atualização da tela.
+A `main.c` define a sequência da aplicação: inicializa serial e display, mostra
+as boas-vindas por 2 segundos, inicializa o monitoramento e executa seus ciclos.
+As funções de aquisição, conversão, saída e recuperação ficam em `monitoring.c`.
+`monitoring_update()` executa um ciclo bloqueante, incluindo a espera de amostragem.
 
 - Leitura dos dois sensores: intervalo alvo de 40 ms (aproximadamente 25 Hz por sensor).
 - OLED: atualização a cada 200 ms (aproximadamente 5 Hz).
@@ -36,7 +40,7 @@ arquivo para inicialização, aquisição, saída serial e atualização da tela
 - Falhas aparecem como `ERRO`. A aplicação tenta reinicializar o sensor a cada 2 s.
   Valores antigos não são exibidos como novas leituras.
 
-Abra o monitor serial USB no Wokwi ou na placa. O cabeçalho é enviado ao detectar
+Abra o monitor serial USB no Wokwi ou na placa. Uma saudação (linha iniciada por `#`) e o cabeçalho CSV são enviados ao detectar
 a conexão, inclusive se o monitor for aberto depois da inicialização:
 
 ```text

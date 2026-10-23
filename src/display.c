@@ -73,3 +73,8 @@ void display_render(void) {
     if (!initialized) return;
     render_on_display(ssd, &frame_area);
 }
+
+void display_show_welcome(void) {
+    const char *lines[] = {"", "BEM-VINDO", "AO TREMO", "", "MONITORAMENTO", "DE MOVIMENTOS"};
+    display_show_lines(lines, sizeof(lines) / sizeof(lines[0]));
+}
