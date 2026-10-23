@@ -48,7 +48,8 @@ pico_set_program_version(tremo_device "0.1")
 pico_generate_pio_header(tremo_device ${CMAKE_CURRENT_LIST_DIR}/ws2818b.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(tremo_device 1)
+# GPIOs 0 e 1 estão reservados para o I2C0 dos MPUs.
+pico_enable_stdio_uart(tremo_device 0)
 pico_enable_stdio_usb(tremo_device 1)
 
 # Add the standard library to the build
