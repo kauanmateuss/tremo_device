@@ -1,57 +1,50 @@
-#include <stdio.h>
 #include "matrix.h"
-
 #include "ws2818b.pio.h"
 
-// Definição das variáveis globais
 static npLED_t leds[LED_COUNT];
 static PIO np_pio;
-static uint sm;
+static int sm = -1;
+static uint initialized_pin;
 
-void npInit(uint pin) {
+bool npInit(uint pin) {
+  if (sm >= 0) return pin == initialized_pin;
+  if (pin >= NUM_BANK0_GPIOS) return false;
 
-  // Cria programa PIO.
-  uint offset = pio_add_program(pio0, &ws2818b_program);
-  np_pio = pio0;
+  PIO ports[] = {pio0, pio1};
+  for (uint i = 0; i < 2; ++i) {
+    if (!pio_can_add_program(ports[i], &ws2818b_program)) continue;
+    int available_sm = pio_claim_unused_sm(ports[i], false);
+    if (available_sm < 0) continue;
 
-  // Toma posse de uma máquina PIO.
-  sm = pio_claim_unused_sm(np_pio, false);
-  if (sm < 0) {
-    np_pio = pio1;
-    sm = pio_claim_unused_sm(np_pio, true); // Se nenhuma máquina estiver livre, panic!
+    np_pio = ports[i];
+    sm = available_sm;
+    uint offset = pio_add_program(np_pio, &ws2818b_program);
+    ws2818b_program_init(np_pio, sm, offset, pin, 800000.f);
+    initialized_pin = pin;
+    npClear();
+    npWrite();
+    return true;
   }
+  return false;
+}
 
-  // Inicia programa na máquina PIO obtida.
-  ws2818b_program_init(np_pio, sm, offset, pin, 800000.f);
+void npSetLED(uint index, uint8_t r, uint8_t g, uint8_t b) {
+  if (index >= LED_COUNT) return;
+  leds[index] = (npLED_t){.R = r, .G = g, .B = b};
+}
 
-  // Limpa buffer de pixels.
+void npClear(void) {
+  for (uint i = 0; i < LED_COUNT; ++i) npSetLED(i, 0, 0, 0);
+}
+
+void npWrite(void) {
+  if (sm < 0) return;
   for (uint i = 0; i < LED_COUNT; ++i) {
-    leds[i].R = 0;
-    leds[i].G = 0;
-    leds[i].B = 0;
+    uint32_t grb = ((uint32_t)leds[i].G << 16) |
+                   ((uint32_t)leds[i].R << 8) | leds[i].B;
+    pio_sm_put_blocking(np_pio, sm, grb << 8);
   }
-}
-
-
-void npSetLED(const uint index, const uint8_t r, const uint8_t g, const uint8_t b) {
-  leds[index].R = r;
-  leds[index].G = g;
-  leds[index].B = b;
-}
-
-// Funcao para limpar o buffer de pixels
-void npClear() {
-  for (uint i = 0; i < LED_COUNT; ++i)
-    npSetLED(i, 0, 0, 0);
-}
-
-// Funcao para escrever os dados do buffer de pixels na matriz de leds
-void npWrite() {
-  // Escreve cada dado de 8-bits dos pixels em sequência no buffer da máquina PIO.
-  for (uint i = 0; i < LED_COUNT; ++i) {
-    pio_sm_put_blocking(np_pio, sm, leds[i].G);
-    pio_sm_put_blocking(np_pio, sm, leds[i].R);
-    pio_sm_put_blocking(np_pio, sm, leds[i].B);
-  }
-  sleep_us(100); // Espera 100us, sinal de RESET do datasheet.
+  while (!pio_sm_is_tx_fifo_empty(np_pio, sm)) tight_loop_contents();
+  // Permite terminar o último pixel (30 us) e manter o intervalo de reset.
+  sleep_us(150);
 }

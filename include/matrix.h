@@ -1,7 +1,6 @@
 #ifndef MATRIX_H
 #define MATRIX_H
 
-#include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 
@@ -19,9 +18,11 @@ typedef struct {
 } npLED_t;
 
 
-void npInit(uint pin);
+// Retorna false se não houver recursos PIO ou se o pino for inválido.
+bool npInit(uint pin);
 void npSetLED(const uint index, const uint8_t r, const uint8_t g, const uint8_t b);
-void npClear();
-void npWrite();
+// Altera somente o buffer; use npWrite para atualizar os LEDs.
+void npClear(void);
+void npWrite(void);
 
 #endif // MATRIX_H
