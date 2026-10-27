@@ -4,9 +4,6 @@
 #include "display.h"
 #include "mpu6050_i2c.h"
 
-#define SAMPLE_INTERVAL_MS 40
-#define DISPLAY_INTERVAL_MS 200
-#define RETRY_INTERVAL_MS 2000
 // Após reset, o giroscópio usa a faixa de ±250 graus/s.
 #define GYRO_SENS_250DPS 131.0f
 
@@ -15,7 +12,6 @@ typedef struct {
     bool ready;
     bool valid;
     uint32_t timestamp_ms;
-    uint32_t retry_ms;
     int16_t accel[3];
     int16_t gyro[3];
 } sensor_t;
@@ -24,29 +20,16 @@ static sensor_t sensors[2] = {
     {.address = MPU6050_ADDR_LOW},
     {.address = MPU6050_ADDR_HIGH}
 };
-static uint32_t next_display_ms;
-static bool serial_connected;
+static uint32_t next_sample_ms, started_ms;
+static bool active, serial_connected, result_available;
+static monitoring_result_t result;
 
 static bool setup_sensor(sensor_t *sensor) {
     sensor->valid = false;
     sensor->ready = mpu6050_reset(sensor->address) &&
-                    mpu6050_set_accel_range(0, sensor->address);
-    sensor->retry_ms = to_ms_since_boot(get_absolute_time()) + RETRY_INTERVAL_MS;
+                    mpu6050_set_accel_range(0, sensor->address) &&
+                    mpu6050_read_raw(sensor->accel, sensor->gyro, sensor->address);
     return sensor->ready;
-}
-
-static void read_sensor(sensor_t *sensor) {
-    uint32_t now = to_ms_since_boot(get_absolute_time());
-    if (!sensor->ready && (int32_t)(now - sensor->retry_ms) >= 0)
-        setup_sensor(sensor);
-
-    sensor->valid = sensor->ready &&
-        mpu6050_read_raw(sensor->accel, sensor->gyro, sensor->address);
-    sensor->timestamp_ms = to_ms_since_boot(get_absolute_time());
-    if (sensor->ready && !sensor->valid) {
-        sensor->ready = false;
-        sensor->retry_ms = sensor->timestamp_ms + RETRY_INTERVAL_MS;
-    }
 }
 
 static void print_sensor(const sensor_t *sensor, unsigned int number) {
@@ -90,33 +73,78 @@ static void update_display(const sensor_t sensors[2]) {
     display_show_lines(lines, 8);
 }
 
-void monitoring_init(void) {
-    mpu6050_setup_i2c();
-    for (int i = 0; i < 2; ++i) setup_sensor(&sensors[i]);
-    next_display_ms = to_ms_since_boot(get_absolute_time());
-    serial_connected = false;
+static void print_result(void) {
+    printf("# RESULTADO motivo=%u duracao_ms=%lu MPU1_validas=%lu MPU1_erros=%lu "
+           "MPU2_validas=%lu MPU2_erros=%lu\n", (unsigned int)result.reason,
+           (unsigned long)result.duration_ms, (unsigned long)result.valid[0],
+           (unsigned long)result.errors[0], (unsigned long)result.valid[1],
+           (unsigned long)result.errors[1]);
 }
 
-void monitoring_update(void) {
-    absolute_time_t next_sample = make_timeout_time_ms(SAMPLE_INTERVAL_MS);
-    for (int i = 0; i < 2; ++i) read_sensor(&sensors[i]);
+void monitoring_init(void) {
+    mpu6050_setup_i2c();
+    active = serial_connected = result_available = false;
+    result = (monitoring_result_t){0};
+}
 
-    // O monitor USB pode ser aberto depois da inicialização da placa.
+bool monitoring_prepare(void) {
+    bool first = setup_sensor(&sensors[0]);
+    bool second = setup_sensor(&sensors[1]);
+    return first && second;
+}
+
+bool monitoring_sensor_ready(unsigned int index) {
+    return index < 2 && sensors[index].ready;
+}
+
+void monitoring_serial_update(void) {
     bool connected = stdio_usb_connected();
-    if (connected) {
-        if (!serial_connected) {
-            printf("# Bem-vindo ao Tremo! Monitoramento dos movimentos.\n");
-            printf("tempo_ms,mpu,status,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n");
-        }
-        for (int i = 0; i < 2; ++i) print_sensor(&sensors[i], i + 1);
+    if (connected && !serial_connected) {
+        printf("# Bem-vindo ao Tremo!\n");
+        printf("tempo_ms,mpu,status,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n");
+        if (result_available && !active) print_result();
     }
     serial_connected = connected;
+}
 
-    uint32_t now = to_ms_since_boot(get_absolute_time());
-    if ((int32_t)(now - next_display_ms) >= 0) {
-        update_display(sensors);
-        next_display_ms = now + DISPLAY_INTERVAL_MS;
+void monitoring_start(uint32_t now_ms) {
+    result = (monitoring_result_t){0};
+    result_available = false;
+    started_ms = next_sample_ms = now_ms;
+    active = true;
+    for (int i = 0; i < 2; ++i) sensors[i].valid = false;
+    if (stdio_usb_connected()) printf("# INICIO SESSAO\n");
+}
+
+bool monitoring_update(uint32_t now_ms) {
+    if (!active || (int32_t)(now_ms - next_sample_ms) < 0) return true;
+    next_sample_ms = now_ms + MONITORING_SAMPLE_MS;
+    bool success = true;
+    for (int i = 0; i < 2; ++i) {
+        sensor_t *sensor = &sensors[i];
+        sensor->valid = mpu6050_read_raw(sensor->accel, sensor->gyro, sensor->address);
+        sensor->ready = sensor->valid;
+        sensor->timestamp_ms = to_ms_since_boot(get_absolute_time());
+        if (sensor->valid) ++result.valid[i];
+        else { ++result.errors[i]; success = false; }
+        if (stdio_usb_connected()) print_sensor(sensor, i + 1);
     }
-    // Se uma operação demorar demais, não tenta recuperar amostras em rajada.
-    sleep_until(next_sample);
+    return success;
+}
+
+void monitoring_draw(void) {
+    update_display(sensors);
+}
+
+void monitoring_stop(uint32_t now_ms, monitoring_end_t reason) {
+    if (!active) return;
+    active = false;
+    result.duration_ms = now_ms - started_ms;
+    result.reason = reason;
+    result_available = true;
+    if (stdio_usb_connected()) print_result();
+}
+
+const monitoring_result_t *monitoring_result(void) {
+    return &result;
 }

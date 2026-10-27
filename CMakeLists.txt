@@ -40,7 +40,9 @@ add_executable(tremo_device main.c
             src/ssd1306_i2c.c
             src/display.c
             src/mpu6050_i2c.c
-            src/monitoring.c)
+            src/monitoring.c
+            src/controls.c
+            src/app.c)
 
 pico_set_program_name(tremo_device "tremo_device")
 pico_set_program_version(tremo_device "0.1")
@@ -52,6 +54,8 @@ pico_generate_pio_header(tremo_device ${CMAKE_CURRENT_LIST_DIR}/ws2818b.pio)
 # GPIOs 0 e 1 estão reservados para o I2C0 dos MPUs.
 pico_enable_stdio_uart(tremo_device 0)
 pico_enable_stdio_usb(tremo_device 1)
+# Limita a espera por um monitor USB lento durante a navegação.
+target_compile_definitions(tremo_device PRIVATE PICO_STDIO_USB_STDOUT_TIMEOUT_US=1000)
 
 # Add the standard library to the build
 target_link_libraries(tremo_device
@@ -67,6 +71,7 @@ target_include_directories(tremo_device PRIVATE
 target_link_libraries(tremo_device 
         hardware_pio
         hardware_i2c
+        hardware_adc
         hardware_clocks
         )
 
