@@ -33,6 +33,13 @@ void npSetLED(uint index, uint8_t r, uint8_t g, uint8_t b) {
   leds[index] = (npLED_t){.R = r, .G = g, .B = b};
 }
 
+void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b) {
+  if (x >= 5 || y >= 5) return;
+  // LED 0 no canto inferior direito; linhas alternam o sentido.
+  uint index = (4 - y) * 5 + (y % 2 == 0 ? 4 - x : x);
+  npSetLED(index, r, g, b);
+}
+
 void npClear(void) {
   for (uint i = 0; i < LED_COUNT; ++i) npSetLED(i, 0, 0, 0);
 }

@@ -3,12 +3,15 @@
 Projeto em C com Pico SDK para a BitDogLab. Uma FSM gerencia o menu e as sessões de monitoramento dos dois MPUs,
 com saída no monitor USB e no OLED. Veja o [guia da task FSM](docs/fsm-monitoramento.md)
 para arquitetura, transições, compilação e critérios de aceitação.
+O menu cognitivo agora oferece o [MOT adaptado](docs/mot-adaptado.md), com protocolo
+experimental próprio para joystick e matriz 5×5, treinamento e registros em RAM.
 
 ## Organização
 
 - `main.c`: inicialização da aplicação e loop principal.
 - `app.h` / `app.c`: FSM, telas, menu e controle das sessões.
-- `controls.h` / `controls.c`: joystick, botões A/B, debounce e eventos.
+- `controls.h` / `controls.c`: dois eixos do joystick, botões A/B, debounce e eventos.
+- `mot.h` / `mot.c`: treinamento e avaliação MOT adaptada, resultados e exportação USB.
 - `monitoring.h` / `monitoring.c`: preparação, aquisição, conversões e resultados.
 - `matrix.h` / `matrix.c`: buffer e envio para os 25 LEDs no GPIO 7.
 - `display.h` / `display.c`: interface simples de texto para o OLED 128×64.
@@ -33,7 +36,8 @@ de usar: a configuração de software não altera o endereço do sensor.
 
 Ao ligar: inicializar periféricos → verificar sensores → boas-vindas → menu.
 O joystick seleciona, A confirma e B volta. As opções são tremores, cognitiva,
-completa e configurações/informações. Cognitiva e completa mostram EM BREVE.
+completa e configurações/informações. Cognitiva abre o submenu MOT/RTI/PRM/PAL/bateria. Somente MOT está implementado;
+as outras opções e a avaliação completa mostram EM BREVE.
 
 Para monitorar: instruções → A preparar → sensores OK → A iniciar → aquisição.
 Uma sessão dura 30 segundos. B solicita interrupção; A confirma e B continua.
@@ -51,9 +55,21 @@ síncronos; a preparação dos dois MPUs leva aproximadamente 400 ms. Os interva
 são metas, não garantias de tempo real. A UART permanece desabilitada porque os
 GPIOs 0/1 estão reservados ao I2C0. A matriz é inicializada apagada.
 
+## MOT adaptado
+
+Cognitiva → MOT → instruções → três alvos de treino → A iniciar → dez alvos → resultados.
+O joystick move o cursor azul em quatro direções até o alvo verde; A seleciona e
+B encerra. Na sobreposição, o LED fica ciano. O prazo de cada alvo é de 10 s.
+Treino exige três acertos e fica separado das métricas. Não há aquisição MPU durante
+este fluxo. A média usa somente acertos avaliativos; acurácia inclui omissões como
+não acertos. Os registros ficam em RAM até iniciar outro MOT ou desligar e são
+exportados via USB ao finalizar/reconectar. Não são escores validados do CANTAB.
+Consulte o guia do MOT para protocolo, limitações de temporização e testes na placa.
+
 ## Contratos das funções
 
 - `npInit` retorna `bool`; repetir com o mesmo pino não reserva outra máquina PIO.
+- `npSetPixel` usa coordenadas 0–4 a partir do canto superior esquerdo.
 - `npSetLED` aceita índices de 0 a 24; índices inválidos são ignorados.
 - `npClear` limpa o buffer. `npWrite` envia o buffer para a matriz.
 - `display_draw_text` altera o buffer; `display_render` envia ao OLED.

@@ -6,14 +6,20 @@
 #include "monitoring.h"
 #include "mpu6050_i2c.h"
 #include "matrix.h"
+#include "mot.h"
 
 static uint32_t clock_ms;
 static control_event_t input;
 static bool healthy[2] = {true, false};
 static bool usb;
+static bool matrix_ok = true;
 static unsigned int reads;
 static char screen[8][64];
 
+uint64_t time_us_64(void) { return (uint64_t)clock_ms * 1000; }
+void npClear(void) {}
+void npWrite(void) {}
+void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b) { (void)x; (void)y; (void)r; (void)g; (void)b; }
 void stdio_init_all(void) {}
 bool stdio_usb_connected(void) { return usb; }
 absolute_time_t get_absolute_time(void) { return clock_ms; }
@@ -30,7 +36,7 @@ void display_show_lines(const char *text[], size_t n) {
         strcpy(screen[i], text[i]);
     }
 }
-bool npInit(uint pin) { assert(pin == LED_PIN); return true; }
+bool npInit(uint pin) { assert(pin == LED_PIN); return matrix_ok; }
 void mpu6050_setup_i2c(void) {}
 bool mpu6050_reset(uint8_t addr) { assert(addr == 0x68 || addr == 0x69); return healthy[addr - 0x68]; }
 bool mpu6050_set_accel_range(uint8_t range, uint8_t addr) { assert(range == 0); return healthy[addr - 0x68]; }
@@ -75,8 +81,18 @@ int main(void) {
     // Todos os itens, incluindo a volta circular do joystick.
     step(CONTROL_UP, 5); step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_INFO);
     step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5);
-    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_UNAVAILABLE);
-    assert(strcmp(screen[0], "AVAL COGNITIVA") == 0);
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_COG_MENU);
+    unsigned int before_mot = reads;
+    step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_MOT);
+    step(CONTROL_CONFIRM, 5); assert(mot_get_state() == MOT_STIMULUS);
+    step(CONTROL_LEFT, 50); step(CONTROL_CONFIRM, 50);
+    step(CONTROL_NONE, 1000); step(CONTROL_BACK, 50);
+    assert(mot_get_state() == MOT_RESULTS);
+    assert(reads == before_mot); // Nenhuma leitura MPU durante o MOT.
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    assert(app_get_state() == APP_COG_UNAVAILABLE);
+    step(CONTROL_BACK, 5);
     step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
     assert(strcmp(screen[0], "AVAL COMPLETA") == 0);
     step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5); step(CONTROL_DOWN, 5);
@@ -133,5 +149,10 @@ int main(void) {
     step(CONTROL_NONE, MONITORING_DURATION_MS);
     assert(app_get_state() == APP_RESULTS);
     assert(monitoring_result()->duration_ms == MONITORING_DURATION_MS);
+    matrix_ok = false;
+    app_init(); step(CONTROL_NONE, 2000);
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_MOT_ERROR);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     puts("PASS FSM: menu, preparo, inicio, interrupcao, conclusao, falha e resultados");
 }

@@ -6,6 +6,8 @@
 #define BUTTON_B_PIN 6
 #define JOYSTICK_Y_PIN 26
 #define JOYSTICK_Y_ADC 0
+#define JOYSTICK_X_PIN 27
+#define JOYSTICK_X_ADC 1
 #define DEBOUNCE_MS 30
 #define JOYSTICK_LOW 1000
 #define JOYSTICK_HIGH 3000
@@ -48,6 +50,7 @@ void controls_init(void) {
     button_b = (button_t){.raw = !gpio_get(BUTTON_B_PIN), .stable = !gpio_get(BUTTON_B_PIN)};
     adc_init();
     adc_gpio_init(JOYSTICK_Y_PIN);
+    adc_gpio_init(JOYSTICK_X_PIN);
     joystick_raw = joystick_stable = 0;
     joystick_changed_ms = 0;
     joystick_armed = true;
@@ -57,12 +60,18 @@ control_event_t controls_poll(uint32_t now_ms) {
     bool a = pressed(&button_a, BUTTON_A_PIN, now_ms);
     bool b = pressed(&button_b, BUTTON_B_PIN, now_ms);
     adc_select_input(JOYSTICK_Y_ADC);
-    uint16_t value = adc_read();
-    // Histerese: uma faixa central mais estreita evita oscilações no limiar.
+    uint16_t y = adc_read();
+    adc_select_input(JOYSTICK_X_ADC);
+    uint16_t x = adc_read();
+    // Histerese e rearmamento somente com ambos os eixos no centro.
+    // Em diagonal, o eixo vertical tem prioridade. VERT/HORZ altos = cima/esquerda.
     int direction = joystick_raw;
-    if (value < JOYSTICK_LOW) direction = 1; // Para baixo.
-    else if (value > JOYSTICK_HIGH) direction = -1; // Para cima.
-    else if (value >= JOYSTICK_CENTER_LOW && value <= JOYSTICK_CENTER_HIGH) direction = 0;
+    if (y < JOYSTICK_LOW) direction = 1;
+    else if (y > JOYSTICK_HIGH) direction = -1;
+    else if (x < JOYSTICK_LOW) direction = 2;
+    else if (x > JOYSTICK_HIGH) direction = -2;
+    else if (y >= JOYSTICK_CENTER_LOW && y <= JOYSTICK_CENTER_HIGH &&
+             x >= JOYSTICK_CENTER_LOW && x <= JOYSTICK_CENTER_HIGH) direction = 0;
     if (direction != joystick_raw) {
         joystick_raw = direction;
         joystick_changed_ms = now_ms;
@@ -72,7 +81,10 @@ control_event_t controls_poll(uint32_t now_ms) {
         joystick_stable = direction;
         if (direction == 0) joystick_armed = true;
         else if (joystick_armed) {
-            event = direction < 0 ? CONTROL_UP : CONTROL_DOWN;
+            if (direction == -1) event = CONTROL_UP;
+            else if (direction == 1) event = CONTROL_DOWN;
+            else if (direction == -2) event = CONTROL_LEFT;
+            else event = CONTROL_RIGHT;
             joystick_armed = false;
         }
     }

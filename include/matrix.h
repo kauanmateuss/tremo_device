@@ -21,6 +21,8 @@ typedef struct {
 // Retorna false se não houver recursos PIO ou se o pino for inválido.
 bool npInit(uint pin);
 void npSetLED(const uint index, const uint8_t r, const uint8_t g, const uint8_t b);
+// Coordenadas 0..4; origem no canto superior esquerdo.
+void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b);
 // Altera somente o buffer; use npWrite para atualizar os LEDs.
 void npClear(void);
 void npWrite(void);

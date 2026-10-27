@@ -7,7 +7,9 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 suites = {
     "controls": ["tests/test_controls.c", "src/controls.c"],
-    "flow": ["tests/test_flow.c", "src/app.c", "src/monitoring.c"],
+    "flow": ["tests/test_flow.c", "src/app.c", "src/monitoring.c", "src/mot.c"],
+    "mot": ["tests/test_mot.c", "src/mot.c"],
+    "matrix": ["tests/test_matrix.c", "src/matrix.c"],
 }
 with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
     for name, sources in suites.items():
@@ -24,4 +26,10 @@ with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
         if name == "flow":
             assert "# RESULTADO motivo=1" in result.stdout
             assert result.stdout.count("# RESULTADO") == 1
+        if name == "mot":
+            rows = [line.split(",") for line in result.stdout.splitlines() if line.startswith("MOT,")]
+            assert len(rows) == 13
+            assert sum(row[1] == "test" for row in rows) == 10
+            assert sum(row[7] == "correct" for row in rows if row[1] == "test") == 8
+            assert result.stdout.count("# MOT_END") == 1
         print(result.stdout, end="")

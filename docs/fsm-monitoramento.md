@@ -1,5 +1,8 @@
 # Task: navegação por FSM e sessão de monitoramento
 
+> Este guia descreve a etapa anterior. A task 06 adicionou o submenu cognitivo e o
+> MOT; consulte [MOT adaptado](mot-adaptado.md). As demais avaliações seguem futuras.
+
 ## Objetivo e limites
 
 Organizar a navegação e controlar quando uma sessão começa e termina, mantendo
