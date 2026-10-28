@@ -41,6 +41,7 @@ add_executable(tremo_device main.c
             src/display.c
             src/mpu6050_i2c.c
             src/patterns.c
+            src/pal.c
             src/prm.c
             src/rti.c
             src/mot.c
