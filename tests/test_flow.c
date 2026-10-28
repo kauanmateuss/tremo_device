@@ -7,9 +7,13 @@
 #include "mpu6050_i2c.h"
 #include "matrix.h"
 #include "mot.h"
+#include "rti.h"
 
 static uint32_t clock_ms;
 static control_event_t input;
+static control_button_state_t button = {.settled = true};
+control_button_state_t controls_confirm_state(void) { return button; }
+uint32_t get_rand_32(void) { return 0; }
 static bool healthy[2] = {true, false};
 static bool usb;
 static bool matrix_ok = true;
@@ -50,6 +54,10 @@ bool mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], uint8_t addr) {
 static void step(control_event_t e, uint32_t elapsed) {
     input = e;
     clock_ms += elapsed;
+    if (e == CONTROL_CONFIRM || e == CONTROL_CONFIRM_RELEASE) {
+        button.pressed = e == CONTROL_CONFIRM;
+        button.edge_us = (uint64_t)clock_ms * 1000;
+    }
     app_update();
 }
 static void start_from_menu(void) {
@@ -89,6 +97,17 @@ int main(void) {
     step(CONTROL_NONE, 1000); step(CONTROL_BACK, 50);
     assert(mot_get_state() == MOT_RESULTS);
     assert(reads == before_mot); // Nenhuma leitura MPU durante o MOT.
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    assert(app_get_state() == APP_RTI);
+    unsigned int before_rti = reads;
+    step(CONTROL_CONFIRM, 5);
+    step(CONTROL_CONFIRM_RELEASE, 50);
+    step(CONTROL_CONFIRM, 50); assert(rti_get_state() == RTI_FOREPERIOD);
+    step(CONTROL_NONE, 1000); assert(rti_get_state() == RTI_STIMULUS);
+    step(CONTROL_CONFIRM_RELEASE, 250);
+    step(CONTROL_BACK, 50); assert(rti_get_state() == RTI_RESULTS);
+    assert(reads == before_rti);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
     assert(app_get_state() == APP_COG_UNAVAILABLE);
@@ -153,6 +172,9 @@ int main(void) {
     app_init(); step(CONTROL_NONE, 2000);
     step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_MOT_ERROR);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    assert(app_get_state() == APP_RTI_ERROR);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     puts("PASS FSM: menu, preparo, inicio, interrupcao, conclusao, falha e resultados");
 }

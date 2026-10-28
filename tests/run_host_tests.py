@@ -7,8 +7,10 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 suites = {
     "controls": ["tests/test_controls.c", "src/controls.c"],
-    "flow": ["tests/test_flow.c", "src/app.c", "src/monitoring.c", "src/mot.c"],
+    "flow": ["tests/test_flow.c", "src/app.c", "src/monitoring.c", "src/mot.c", "src/rti.c"],
     "mot": ["tests/test_mot.c", "src/mot.c"],
+    "rti": ["tests/test_rti.c", "src/rti.c"],
+    "rti_input": ["tests/test_rti_input.c", "src/rti.c", "src/controls.c"],
     "matrix": ["tests/test_matrix.c", "src/matrix.c"],
 }
 with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
@@ -32,4 +34,23 @@ with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
             assert sum(row[1] == "test" for row in rows) == 10
             assert sum(row[7] == "correct" for row in rows if row[1] == "test") == 8
             assert result.stdout.count("# MOT_END") == 1
+        if name == "rti":
+            rows = [line.split(",") for line in result.stdout.splitlines() if line.startswith("RTI,")]
+            assert len(rows) == 13 and all(len(row) == 10 for row in rows)
+            evaluated = [row for row in rows if row[1] == "test"]
+            assert len(evaluated) == 10
+            assert [row[2] for row in evaluated] == [str(i) for i in range(1, 11)]
+            assert sum(row[3] == "response" for row in evaluated) == 8
+            assert sum(row[3] == "anticipation" for row in evaluated) == 1
+            assert sum(row[3] == "omission" for row in evaluated) == 1
+            for row in rows:
+                if row[3] == "response":
+                    assert int(row[9]) == int(row[7]) - int(row[6])
+                else:
+                    assert row[9] == ""
+                if row[3] == "anticipation":
+                    assert row[6] == ""
+                if row[3] == "omission":
+                    assert row[7] == ""
+            assert result.stdout.count("# RTI_END records=13") == 1
         print(result.stdout, end="")

@@ -40,6 +40,7 @@ add_executable(tremo_device main.c
             src/ssd1306_i2c.c
             src/display.c
             src/mpu6050_i2c.c
+            src/rti.c
             src/mot.c
             src/monitoring.c
             src/controls.c
@@ -60,7 +61,8 @@ target_compile_definitions(tremo_device PRIVATE PICO_STDIO_USB_STDOUT_TIMEOUT_US
 
 # Add the standard library to the build
 target_link_libraries(tremo_device
-        pico_stdlib)
+        pico_stdlib
+        pico_rand)
 
 # Add the standard include files to the build
 target_include_directories(tremo_device PRIVATE
