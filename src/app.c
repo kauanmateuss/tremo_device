@@ -285,6 +285,7 @@ void app_update(void) {
         pal_serial_update();
     }
 
+    now = now_ms(); // A saída USB pode consumir tempo antes de agendar a leitura.
     switch (state) {
     case APP_WELCOME:
         if (now - welcome_started_ms >= WELCOME_MS) enter_state(APP_MENU);
@@ -345,7 +346,7 @@ void app_update(void) {
             finish_session(MONITORING_COMPLETE);
             break;
         }
-        if (event == CONTROL_PAUSE) {
+        if (event == CONTROL_PAUSE || session_current()->pause_requested) {
             monitoring_pause(now); session_pause(time_us_64()); enter_state(APP_PAUSED); break;
         }
         if (event == CONTROL_BACK)
