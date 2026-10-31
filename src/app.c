@@ -12,6 +12,7 @@
 #include "pico/rand.h"
 #include "session.h"
 #include "assessment.h"
+#include "evaluation.h"
 
 #define WELCOME_MS 2000
 #define DISPLAY_MS 200
@@ -57,11 +58,36 @@ static void show_results(void) {
 }
 
 static void show_config(void) {
-    char duration[24], rate[24];
-    snprintf(duration, sizeof(duration), "%cTEMPO %lu S", config_option == 0 ? '-' : ' ', (unsigned long)(session_config()->duration_ms / 1000));
-    snprintf(rate, sizeof(rate), "%cTAXA %u HZ", config_option == 1 ? '-' : ' ', 1000 / session_config()->sample_ms);
-    const char *lines[] = {"CONFIGURACOES", duration, rate, "A ALTERAR", "B MENU", "", "CLIQUE JOYSTICK", "SOLICITA PAUSA"};
+    char rows[7][24];
+    const session_config_t *c = session_config();
+    snprintf(rows[0], sizeof(rows[0]), "TEMPO %lu S", (unsigned long)(c->duration_ms / 1000));
+    snprintf(rows[1], sizeof(rows[1]), "TAXA %u HZ", 1000 / c->sample_ms);
+    const char *names[] = {"MOT", "RTI", "PRM", "PAL"};
+    for (unsigned i = 0; i < 4; ++i) snprintf(rows[i + 2], sizeof(rows[0]), "%s %s", names[i], c->tests_mask & (1u << i) ? "SIM" : "NAO");
+    snprintf(rows[6], sizeof(rows[6]), "MPU %s", c->tremor_first ? "ANTES" : "DEPOIS");
+    // Janela de três opções mantém instruções visíveis no OLED.
+    const char *lines[] = {"CONFIGURACOES", rows[config_option], rows[(config_option + 1) % 7], rows[(config_option + 2) % 7], "ALTERA PRIMEIRA", "A ALTERAR", "B MENU", "CLIQUE PAUSA"};
     display_show_lines(lines, 8);
+}
+static void show_evaluation_results(void) {
+    const evaluation_t *e = evaluation_current();
+    const char *names[] = {"MOT", "RTI", "PRM", "PAL", "MPU"};
+    const char *status[] = {"PENDENTE", "EXECUTANDO", "OK", "LIMITE", "PARADO", "FALHA"};
+    char rows[5][24];
+    for (unsigned i = 0; i < 5; ++i) {
+        if (i < e->count) snprintf(rows[i], sizeof(rows[i]), "%s %s", names[e->steps[i].module], status[e->steps[i].status]);
+        else rows[i][0] = 0;
+    }
+    const char *lines[] = {"RESUMO SESSAO", session_current()->state == SESSION_COMPLETE ? "CONCLUIDA" : "ENCERRADA",
+        rows[0], rows[1], rows[2], rows[3], rows[4], "A OU B MENU"};
+    display_show_lines(lines, 8);
+    if (stdio_usb_connected()) {
+        printf("# EVALUATION id=%016llx state=%u active_us=%llu pauses=%lu\n", (unsigned long long)e->session_id,
+            session_current()->state, (unsigned long long)session_active_us(time_us_64()), (unsigned long)session_current()->pauses);
+        for (unsigned i = 0; i < e->count; ++i) printf("# STEP module=%u status=%u correct=%lu wrong=%lu omissions=%lu\n",
+            e->steps[i].module, e->steps[i].status, (unsigned long)e->steps[i].correct,
+            (unsigned long)e->steps[i].wrong, (unsigned long)e->steps[i].omissions);
+    }
 }
 
 // A entrada em um estado desenha a tela uma vez. Só a aquisição atualiza periodicamente.
@@ -129,19 +155,19 @@ static void enter_state(app_state_t next) {
         show_cognitive_menu();
         break;
     case APP_MOT:
-        session_begin(SESSION_MOT, time_us_64());
+        if (!evaluation_current()->active) session_begin(SESSION_MOT, time_us_64());
         assessment_begin(0);
         break;
     case APP_RTI:
-        session_begin(SESSION_RTI, time_us_64());
+        if (!evaluation_current()->active) session_begin(SESSION_RTI, time_us_64());
         assessment_begin(1);
         break;
     case APP_PRM:
-        session_begin(SESSION_PRM, time_us_64());
+        if (!evaluation_current()->active) session_begin(SESSION_PRM, time_us_64());
         assessment_begin(2);
         break;
     case APP_PAL:
-        session_begin(SESSION_PAL, time_us_64());
+        if (!evaluation_current()->active) session_begin(SESSION_PAL, time_us_64());
         assessment_begin(3);
         break;
     case APP_COG_UNAVAILABLE: {
@@ -158,6 +184,12 @@ static void enter_state(app_state_t next) {
         display_show_lines(lines, 4);
         break;
     }
+    case APP_EVAL_SETUP: {
+        const char *lines[] = {session_current()->kind == SESSION_FULL ? "AVAL COMPLETA" : "BATERIA", "VEJA CONFIG", "UMA POR VEZ", "A PROX B FIM", "CLIQUE PAUSA", "", "A INICIAR", "B CANCELAR"};
+        display_show_lines(lines, 8); break;
+    }
+    case APP_EVAL_RESULTS:
+        show_evaluation_results(); break;
     case APP_PAUSED: {
         const char *lines[] = {"SESSAO PAUSADA", "", "A CONTINUAR", "B ENCERRAR"};
         display_show_lines(lines, 4); break;
@@ -167,13 +199,58 @@ static void enter_state(app_state_t next) {
     }
 }
 
+static void evaluation_end(session_state_t reason);
 static void finish_session(monitoring_end_t reason) {
     monitoring_stop(now_ms(), reason);
-    session_finish(reason == MONITORING_COMPLETE ? SESSION_COMPLETE : reason == MONITORING_INTERRUPTED ? SESSION_INTERRUPTED : SESSION_ERROR, time_us_64());
+    if (!evaluation_current()->active) session_finish(reason == MONITORING_COMPLETE ? SESSION_COMPLETE : reason == MONITORING_INTERRUPTED ? SESSION_INTERRUPTED : SESSION_ERROR, time_us_64());
+    if (evaluation_current()->active) {
+        evaluation_record(reason == MONITORING_COMPLETE ? STEP_COMPLETE : reason == MONITORING_INTERRUPTED ? STEP_INTERRUPTED : STEP_ERROR, 0, 0, 0);
+        if (reason != MONITORING_COMPLETE) { evaluation_end(reason == MONITORING_INTERRUPTED ? SESSION_INTERRUPTED : SESSION_ERROR); return; }
+    }
     enter_state(APP_RESULTS);
+    if (evaluation_current()->active) { display_draw_text("A PROX B FIM   ", 5, 56); display_render(); }
+}
+
+static void evaluation_end(session_state_t reason) {
+    if (reason != SESSION_COMPLETE) evaluation_cancel(reason == SESSION_ERROR);
+    session_finish(reason, time_us_64());
+    enter_state(APP_EVAL_RESULTS);
+}
+static void launch_step(void) {
+    evaluation_start_step();
+    unsigned module = evaluation_current()->steps[evaluation_current()->index].module;
+    if (module == EVALUATION_TREMOR) enter_state(APP_INSTRUCTIONS);
+    else {
+        const app_state_t states[] = {APP_MOT, APP_RTI, APP_PRM, APP_PAL};
+        enter_state(states[module]);
+    }
+}
+static void launch_evaluation(bool full) {
+    if (!matrix_ready) { enter_state(APP_MOT_ERROR); return; }
+    session_begin(full ? SESSION_FULL : SESSION_BATTERY, time_us_64());
+    if (evaluation_begin(full, session_current())) enter_state(APP_EVAL_SETUP);
+}
+static void evaluation_continue(control_event_t event) {
+    if (event == CONTROL_BACK) evaluation_end(SESSION_INTERRUPTED);
+    else if (event == CONTROL_CONFIRM) {
+        if (evaluation_next()) launch_step();
+        else evaluation_end(SESSION_COMPLETE);
+    }
+}
+static void record_cognitive_step(void) {
+    unsigned module = evaluation_current()->steps[evaluation_current()->index].module;
+    switch (module) {
+    case 0: evaluation_record(assessment_interrupted() ? STEP_INTERRUPTED : STEP_COMPLETE, mot_result()->correct, mot_result()->wrong, mot_result()->omissions); break;
+    case 1: evaluation_record(assessment_interrupted() ? STEP_INTERRUPTED : STEP_COMPLETE, rti_result()->responses, rti_result()->anticipations, rti_result()->omissions); break;
+    case 2: evaluation_record(assessment_interrupted() ? STEP_INTERRUPTED : STEP_COMPLETE, prm_result()->correct, prm_result()->wrong, prm_result()->omissions); break;
+    case 3: evaluation_record(assessment_interrupted() ? STEP_INTERRUPTED : pal_result()->limit_reached ? STEP_LIMIT : STEP_COMPLETE, pal_result()->correct, pal_result()->wrong, pal_result()->omissions); break;
+    }
+    if (assessment_interrupted()) evaluation_end(SESSION_INTERRUPTED);
+    else { display_draw_text("A PROX B FIM   ", 5, 56); display_render(); }
 }
 
 void app_init(void) {
+    evaluation_cancel(false);
     stdio_init_all();
     session_init(get_rand_32());
     controls_init();
@@ -191,8 +268,12 @@ void app_update(void) {
     // Captura o instante após aceitar o evento, antes de qualquer saída serial/OLED.
     uint64_t event_us = time_us_64();
     if (state == APP_MOT || state == APP_RTI || state == APP_PRM || state == APP_PAL) {
+        if (evaluation_current()->active && assessment_finished()) { assessment_update(CONTROL_NONE, event_us); evaluation_continue(event); return; }
         bool leave = assessment_update(event, event_us);
-        if (assessment_finished()) session_finish(assessment_interrupted() ? SESSION_INTERRUPTED : SESSION_COMPLETE, time_us_64());
+        if (assessment_finished()) {
+            if (evaluation_current()->active) record_cognitive_step();
+            else session_finish(assessment_interrupted() ? SESSION_INTERRUPTED : SESSION_COMPLETE, time_us_64());
+        }
         if (leave) enter_state(APP_COG_MENU);
         return;
     }
@@ -211,6 +292,7 @@ void app_update(void) {
     case APP_MENU:
         if (event == CONTROL_UP) { menu_option = (menu_option + 3) % 4; show_menu(); }
         else if (event == CONTROL_DOWN) { menu_option = (menu_option + 1) % 4; show_menu(); }
+        else if (event == CONTROL_CONFIRM && menu_option == 2) launch_evaluation(true);
         else if (event == CONTROL_CONFIRM) {
             enter_state(menu_option == 0 ? APP_INSTRUCTIONS :
                         menu_option == 1 ? APP_COG_MENU :
@@ -218,14 +300,15 @@ void app_update(void) {
         }
         break;
     case APP_INSTRUCTIONS:
-        if (event == CONTROL_BACK) enter_state(APP_MENU);
+        if (event == CONTROL_BACK) { if (evaluation_current()->active) evaluation_end(SESSION_INTERRUPTED); else enter_state(APP_MENU); }
         else if (event == CONTROL_CONFIRM) enter_state(APP_PREPARING);
         break;
     case APP_PREPARING:
         if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
         else if (monitoring_prepare()) {
             monitoring_calibration_begin(now_ms()); enter_state(APP_CALIBRATING);
-        } else enter_state(APP_SENSOR_ERROR);
+        } else if (evaluation_current()->active) evaluation_end(SESSION_ERROR);
+        else enter_state(APP_SENSOR_ERROR);
         break;
     case APP_CALIBRATING:
         if (event == CONTROL_BACK) { monitoring_calibration_cancel(); enter_state(APP_INSTRUCTIONS); }
@@ -233,7 +316,7 @@ void app_update(void) {
             calibration_state_t c = monitoring_calibration_update(now);
             if (c == CAL_OK) enter_state(APP_READY);
             else if (c == CAL_MOVING) enter_state(APP_CAL_ERROR);
-            else if (c == CAL_SENSOR_ERROR) enter_state(APP_SENSOR_ERROR);
+            else if (c == CAL_SENSOR_ERROR) { if (evaluation_current()->active) evaluation_end(SESSION_ERROR); else enter_state(APP_SENSOR_ERROR); }
         }
         break;
     case APP_CAL_ERROR:
@@ -243,7 +326,7 @@ void app_update(void) {
     case APP_READY:
         if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
         else if (event == CONTROL_CONFIRM) {
-            session_begin(SESSION_TREMOR, time_us_64());
+            if (!evaluation_current()->active) session_begin(SESSION_TREMOR, time_us_64());
             monitoring_start(now_ms());
             enter_state(APP_ACQUIRING);
         }
@@ -258,7 +341,7 @@ void app_update(void) {
             finish_session(MONITORING_INTERRUPTED);
             break;
         }
-        if (session_active_us(time_us_64()) >= (uint64_t)session_current()->config.duration_ms * 1000) {
+        if (monitoring_elapsed_ms(now) >= session_current()->config.duration_ms) {
             finish_session(MONITORING_COMPLETE);
             break;
         }
@@ -279,7 +362,15 @@ void app_update(void) {
             session_resume(time_us_64()); monitoring_resume(now); enter_state(APP_ACQUIRING);
         }
         break;
+    case APP_EVAL_SETUP:
+        if (event == CONTROL_BACK) evaluation_end(SESSION_INTERRUPTED);
+        else if (event == CONTROL_CONFIRM) launch_step();
+        break;
+    case APP_EVAL_RESULTS:
+        if (event == CONTROL_CONFIRM || event == CONTROL_BACK) enter_state(APP_MENU);
+        break;
     case APP_RESULTS:
+        if (evaluation_current()->active) { evaluation_continue(event); break; }
         if (event == CONTROL_BACK || event == CONTROL_CONFIRM) enter_state(APP_MENU);
         break;
     case APP_COG_MENU:
@@ -291,7 +382,7 @@ void app_update(void) {
             else if (cognitive_option == 1) enter_state(matrix_ready ? APP_RTI : APP_RTI_ERROR);
             else if (cognitive_option == 2) enter_state(matrix_ready ? APP_PRM : APP_PRM_ERROR);
             else if (cognitive_option == 3) enter_state(matrix_ready ? APP_PAL : APP_PAL_ERROR);
-            else enter_state(APP_COG_UNAVAILABLE);
+            else launch_evaluation(false);
         }
         break;
     case APP_COG_UNAVAILABLE:
@@ -307,11 +398,13 @@ void app_update(void) {
     case APP_PAL:
         break; // Tratado antes deste switch para isolar a execução cronometrada.
     case APP_INFO:
-        if (event == CONTROL_UP || event == CONTROL_DOWN) { config_option ^= 1; show_config(); }
+        if (event == CONTROL_UP || event == CONTROL_DOWN) { config_option = (config_option + (event == CONTROL_DOWN ? 1 : 6)) % 7; show_config(); }
         else if (event == CONTROL_CONFIRM) {
             session_config_t c = *session_config();
             if (config_option == 0) c.duration_ms = c.duration_ms == 30000 ? 60000 : 30000;
-            else c.sample_ms = c.sample_ms == 40 ? 20 : 40;
+            else if (config_option == 1) c.sample_ms = c.sample_ms == 40 ? 20 : 40;
+            else if (config_option < 6) c.tests_mask ^= 1u << (config_option - 2);
+            else c.tremor_first = !c.tremor_first;
             session_configure(c); show_config();
         } else if (event == CONTROL_BACK) enter_state(APP_MENU);
         break;

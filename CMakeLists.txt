@@ -47,6 +47,7 @@ add_executable(tremo_device main.c
             src/mot.c
             src/monitoring.c
             src/controls.c
+            src/evaluation.c
             src/session.c
             src/assessment.c
             src/app.c)
