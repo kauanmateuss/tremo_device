@@ -12,6 +12,7 @@ typedef enum {
 } monitoring_end_t;
 
 typedef struct {
+    uint64_t session_id;
     uint32_t duration_ms;
     uint32_t valid[2];
     uint32_t errors[2];
@@ -24,6 +25,8 @@ void monitoring_init(void);
 bool monitoring_prepare(void);
 bool monitoring_sensor_ready(unsigned int index);
 void monitoring_start(uint32_t now_ms);
+void monitoring_pause(uint32_t now_ms);
+void monitoring_resume(uint32_t now_ms);
 // Agenda uma leitura se estiver no prazo. false indica falha de aquisição.
 bool monitoring_update(uint32_t now_ms);
 void monitoring_draw(void);

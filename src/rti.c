@@ -1,4 +1,5 @@
 #include "rti.h"
+#include "session.h"
 #include "display.h"
 #include "matrix.h"
 #include "pico/stdlib.h"
@@ -18,6 +19,7 @@ static void clear_matrix(void) {
 }
 
 static void export_result(void) {
+    printf("# SESSION id=%016llx module=RTI\n", (unsigned long long)result.session_id);
     printf("# RTI_ADAPTADO_V1 interrupted=%u responses=%u anticipations=%u omissions=%u\n",
            result.interrupted, result.responses, result.anticipations, result.omissions);
     printf("rti,phase,trial,outcome,planned_wait_us,hold_us,onset_us,release_us,end_us,reaction_us\n");
@@ -117,7 +119,7 @@ static void end_trial(rti_outcome_t outcome, uint64_t now_us) {
 }
 
 void rti_begin(void) {
-    result = (rti_result_t){0};
+    result = (rti_result_t){.session_id = session_current()->id};
     saved = false;
     training = true;
     trial = training_responses = 0;
@@ -186,7 +188,7 @@ bool rti_update(control_event_t event, control_button_state_t button, uint64_t n
         break;
     case RTI_TRAINING_FAILED:
         if (event == CONTROL_CONFIRM) {
-            result = (rti_result_t){0};
+            result = (rti_result_t){.session_id = session_current()->id};
             trial = training_responses = 0;
             prepare_trial();
         }
@@ -205,3 +207,5 @@ void rti_serial_update(void) {
 
 rti_state_t rti_get_state(void) { return state; }
 const rti_result_t *rti_result(void) { return &result; }
+
+void rti_resume_after_pause(uint64_t delta_us) { interval_started_us += delta_us; }

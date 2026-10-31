@@ -7,16 +7,18 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 suites = {
     "controls": ["tests/test_controls.c", "src/controls.c"],
-    "flow": ["tests/test_flow.c", "src/app.c", "src/monitoring.c", "src/mot.c", "src/rti.c", "src/prm.c", "src/pal.c", "src/patterns.c"],
+    "flow": ["tests/test_flow.c", "src/app.c", "src/assessment.c", "src/monitoring.c", "src/mot.c", "src/rti.c", "src/prm.c", "src/pal.c", "src/patterns.c"],
     "mot": ["tests/test_mot.c", "src/mot.c"],
     "rti": ["tests/test_rti.c", "src/rti.c"],
     "rti_input": ["tests/test_rti_input.c", "src/rti.c", "src/controls.c"],
     "prm": ["tests/test_prm.c", "src/prm.c", "src/patterns.c"],
     "pal": ["tests/test_pal.c", "src/pal.c", "src/patterns.c"],
+    "session": ["tests/test_session.c"],
     "matrix": ["tests/test_matrix.c", "src/matrix.c"],
 }
 with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
     for name, sources in suites.items():
+        sources = sources + ["src/session.c"]
         executable = str(Path(directory) / name)
         subprocess.run([
             "cc", "-std=c11", "-Wall", "-Wextra", "-Werror",

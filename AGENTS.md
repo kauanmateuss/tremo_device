@@ -1,6 +1,6 @@
 # Fluxo de trabalho
 
-- Antes de implementar cada nova task, crie uma branch específica com prefixo `codex/` e nome descritivo.
+- Antes de implementar cada nova task, crie uma branch específica com prefixo `feature/` e nome descritivo.
 - Mantenha as mudanças da tarefa nessa branch; não implemente diretamente na `main`.
 - Valide as alterações com compilação e verificações adequadas ao escopo antes de realizar commits.
 - Faça commits descritivos, preferencialmente em português, usando prefixos como `feat:`, `fix:`, `refactor:` e `docs:`.

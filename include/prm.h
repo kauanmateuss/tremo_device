@@ -27,6 +27,7 @@ typedef struct {
     uint64_t onset_us, elapsed_us;
 } prm_record_t;
 typedef struct {
+    uint64_t session_id;
     bool interrupted;
     uint8_t correct, wrong, omissions, record_count;
     uint64_t correct_time_us;

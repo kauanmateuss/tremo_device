@@ -29,6 +29,7 @@ typedef struct {
 } rti_record_t;
 
 typedef struct {
+    uint64_t session_id;
     bool interrupted;
     uint8_t responses, anticipations, omissions, record_count;
     uint64_t response_time_us;
@@ -37,6 +38,8 @@ typedef struct {
 
 // Requer OLED/matriz inicializados. Protocolo local simples por soltura, não CANTAB oficial.
 void rti_begin(void);
+// Só após pausa em fronteira segura; desloca o relógio do intervalo.
+void rti_resume_after_pause(uint64_t delta_us);
 // true retorna ao menu. now_us é monotônico; botão deve vir do último controls_poll().
 bool rti_update(control_event_t event, control_button_state_t button, uint64_t now_us);
 void rti_serial_update(void);

@@ -26,6 +26,7 @@ typedef struct {
 } mot_record_t;
 
 typedef struct {
+    uint64_t session_id;
     bool interrupted;
     uint8_t correct, wrong, omissions;
     uint64_t correct_time_us;
@@ -35,6 +36,8 @@ typedef struct {
 
 // Requer matriz e OLED inicializados. Inicia pelas instruções, sem coleta MPU.
 void mot_begin(void);
+// Só após pausa em fronteira segura; desloca o relógio do intervalo.
+void mot_resume_after_pause(uint64_t delta_us);
 // true pede retorno ao menu cognitivo. event_us é o instante de detecção do evento.
 bool mot_update(control_event_t event, uint64_t event_us);
 // Exporta registros retidos ao conectar USB, somente fora de uma execução ativa.

@@ -1,4 +1,5 @@
 #include "pal.h"
+#include "session.h"
 #include "patterns.h"
 #include "matrix.h"
 #include "display.h"
@@ -23,6 +24,7 @@ static void draw_choice(void) {
 }
 
 static void export_result(void) {
+    printf("# SESSION id=%016llx module=PAL\n", (unsigned long long)result.session_id);
     const char *names[] = {"correct", "wrong", "omission", "aborted"};
     printf("# PAL_ADAPTADO_V1 interrupted=%u limit=%u levels=%u rounds=%u correct=%u wrong=%u omissions=%u\n",
            result.interrupted, result.limit_reached, result.levels_completed, result.rounds_started,
@@ -152,7 +154,7 @@ static void end_round(void) {
 }
 
 void pal_begin(void) {
-    result = (pal_result_t){0};
+    result = (pal_result_t){.session_id = session_current()->id};
     saved = false;
     training = true;
     pairs = PAL_TRAINING_PAIRS;
@@ -213,7 +215,7 @@ bool pal_update(control_event_t event, uint64_t event_us) {
         if (event == CONTROL_CONFIRM) { training = false; pairs = 2; start_level(); }
         break;
     case PAL_TRAINING_FAILED:
-        if (event == CONTROL_CONFIRM) { result = (pal_result_t){0}; start_round(); }
+        if (event == CONTROL_CONFIRM) { result = (pal_result_t){.session_id = session_current()->id}; start_round(); }
         break;
     case PAL_RETRY:
         if (event == CONTROL_CONFIRM) { ++round_number; start_round(); }

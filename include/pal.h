@@ -28,6 +28,7 @@ typedef struct {
     uint64_t onset_us, elapsed_us;
 } pal_record_t;
 typedef struct {
+    uint64_t session_id;
     bool interrupted, limit_reached;
     uint8_t correct, wrong, omissions, levels_completed, rounds_started, record_count;
     uint64_t correct_time_us;

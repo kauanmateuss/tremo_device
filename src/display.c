@@ -3,7 +3,7 @@
 #include "display.h"
 #include <string.h>
 
-static uint8_t ssd[ssd1306_buffer_length];
+static uint8_t ssd[ssd1306_buffer_length], saved_screen[ssd1306_buffer_length];
 static struct render_area frame_area;
 static bool initialized;
 
@@ -78,3 +78,6 @@ void display_show_welcome(void) {
     const char *lines[] = {"", "BEM-VINDO", "AO TREMO", "", "MONITORAMENTO", "DE MOVIMENTOS"};
     display_show_lines(lines, sizeof(lines) / sizeof(lines[0]));
 }
+
+void display_save_screen(void) { memcpy(saved_screen, ssd, sizeof(ssd)); }
+void display_restore_screen(void) { memcpy(ssd, saved_screen, sizeof(ssd)); display_render(); }

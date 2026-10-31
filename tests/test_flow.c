@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "app.h"
+#include "session.h"
 #include "controls.h"
 #include "monitoring.h"
 #include "mpu6050_i2c.h"
@@ -11,7 +12,7 @@
 #include "prm.h"
 #include "pal.h"
 
-static uint32_t clock_ms;
+static uint64_t clock_ms;
 static control_event_t input;
 static control_button_state_t button = {.settled = true};
 control_button_state_t controls_confirm_state(void) { return button; }
@@ -20,7 +21,9 @@ static bool healthy[2] = {true, false};
 static bool usb;
 static bool matrix_ok = true;
 static unsigned int reads;
-static char screen[8][64];
+static char screen[8][64], saved_screen[8][64];
+void display_save_screen(void) { memcpy(saved_screen, screen, sizeof(screen)); }
+void display_restore_screen(void) { memcpy(screen, saved_screen, sizeof(screen)); }
 
 uint64_t time_us_64(void) { return (uint64_t)clock_ms * 1000; }
 void npClear(void) {}
@@ -95,7 +98,12 @@ int main(void) {
     unsigned int before_mot = reads;
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_MOT);
     step(CONTROL_CONFIRM, 5); assert(mot_get_state() == MOT_STIMULUS);
+    step(CONTROL_PAUSE, 5); assert(session_current()->pause_requested);
     step(CONTROL_LEFT, 50); step(CONTROL_CONFIRM, 50);
+    assert(session_current()->state == SESSION_PAUSED && mot_get_state() == MOT_INTERVAL);
+    step(CONTROL_NONE, 5000); assert(mot_get_state() == MOT_INTERVAL);
+    step(CONTROL_CONFIRM, 5); assert(session_current()->state == SESSION_RUNNING);
+    assert(mot_result()->session_id == session_current()->id);
     step(CONTROL_NONE, 1000); step(CONTROL_BACK, 50);
     assert(mot_get_state() == MOT_RESULTS);
     assert(reads == before_mot); // Nenhuma leitura MPU durante o MOT.
@@ -153,6 +161,10 @@ int main(void) {
     usb = false; step(CONTROL_CONFIRM, 5);
     start_from_menu();
     assert(monitoring_result()->valid[0] == 0); // Nova sessão limpa contagens.
+    step(CONTROL_PAUSE, 0); assert(app_get_state() == APP_PAUSED);
+    unsigned paused_reads = reads;
+    step(CONTROL_NONE, 5000); assert(reads == paused_reads);
+    step(CONTROL_CONFIRM, 0); assert(app_get_state() == APP_ACQUIRING);
     step(CONTROL_NONE, 0);
     for (uint32_t elapsed = 5; elapsed < MONITORING_DURATION_MS; elapsed += 5)
         step(CONTROL_NONE, 5);

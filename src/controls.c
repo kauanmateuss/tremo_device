@@ -22,7 +22,7 @@ typedef struct {
     uint64_t edge_us;
 } button_t;
 
-static button_t button_a, button_b;
+static button_t button_a, button_b, button_sw;
 static int joystick_raw, joystick_stable;
 static uint32_t joystick_changed_ms;
 static bool joystick_armed;
@@ -50,6 +50,10 @@ void controls_init(void) {
     gpio_init(BUTTON_B_PIN);
     gpio_set_dir(BUTTON_B_PIN, GPIO_IN);
     gpio_pull_up(BUTTON_B_PIN);
+    gpio_init(22);
+    gpio_set_dir(22, GPIO_IN);
+    gpio_pull_up(22);
+    button_sw = (button_t){.raw = !gpio_get(22), .stable = !gpio_get(22)};
     // Botão já segurado ao ligar não deve confirmar uma opção.
     button_a = (button_t){.raw = !gpio_get(BUTTON_A_PIN), .stable = !gpio_get(BUTTON_A_PIN)};
     button_b = (button_t){.raw = !gpio_get(BUTTON_B_PIN), .stable = !gpio_get(BUTTON_B_PIN)};
@@ -63,6 +67,7 @@ void controls_init(void) {
 }
 
 control_event_t controls_poll(uint32_t now_ms) {
+    bool sw_changed = update_button(&button_sw, 22, now_ms);
     bool a_changed = update_button(&button_a, BUTTON_A_PIN, now_ms);
     bool b_changed = update_button(&button_b, BUTTON_B_PIN, now_ms);
     confirm_settled = button_a.raw == button_a.stable &&
@@ -98,6 +103,7 @@ control_event_t controls_poll(uint32_t now_ms) {
     }
     if (b_changed && button_b.stable) return CONTROL_BACK;
     if (a_changed) return button_a.stable ? CONTROL_CONFIRM : CONTROL_CONFIRM_RELEASE;
+    if (sw_changed && button_sw.stable) return CONTROL_PAUSE;
     return event;
 }
 

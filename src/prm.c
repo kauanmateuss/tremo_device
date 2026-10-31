@@ -1,4 +1,5 @@
 #include "prm.h"
+#include "session.h"
 #include "patterns.h"
 #include "display.h"
 #include "pico/stdlib.h"
@@ -17,6 +18,7 @@ static uint8_t target(void) { return deck[offset() + count - 1 - trial]; }
 static uint8_t novel(void) { return deck[offset() + count + trial]; }
 
 static void export_result(void) {
+    printf("# SESSION id=%016llx module=PRM\n", (unsigned long long)result.session_id);
     const char *names[] = {"correct", "wrong", "omission", "aborted"};
     printf("# PRM_ADAPTADO_V1 interrupted=%u correct=%u wrong=%u omissions=%u\n",
            result.interrupted, result.correct, result.wrong, result.omissions);
@@ -112,7 +114,7 @@ static void end_choice(prm_outcome_t outcome, uint64_t event_us) {
 }
 
 void prm_begin(void) {
-    result = (prm_result_t){0};
+    result = (prm_result_t){.session_id = session_current()->id};
     saved = false;
     training = true;
     for (uint8_t i = 0; i < PATTERN_COUNT; ++i) deck[i] = i;
@@ -171,7 +173,7 @@ bool prm_update(control_event_t event, uint64_t event_us) {
         if (event == CONTROL_CONFIRM) { training = false; start_block(); }
         break;
     case PRM_TRAINING_FAILED:
-        if (event == CONTROL_CONFIRM) { result = (prm_result_t){0}; start_block(); }
+        if (event == CONTROL_CONFIRM) { result = (prm_result_t){.session_id = session_current()->id}; start_block(); }
         break;
     case PRM_RESULTS:
         break;

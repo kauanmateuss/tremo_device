@@ -1,4 +1,5 @@
 #include "mot.h"
+#include "session.h"
 #include "display.h"
 #include "matrix.h"
 #include "pico/stdlib.h"
@@ -52,6 +53,7 @@ static void show_results(void) {
 }
 
 static void export_result(void) {
+    printf("# SESSION id=%016llx module=MOT\n", (unsigned long long)result.session_id);
     // Exportação apenas após encerrar: nenhuma escrita USB no intervalo cronometrado.
     printf("# MOT_ADAPTADO_V1 interrupted=%u correct=%u wrong=%u omissions=%u\n",
            result.interrupted, result.correct, result.wrong, result.omissions);
@@ -116,7 +118,7 @@ static void end_trial(mot_outcome_t outcome, uint64_t event_us) {
 }
 
 void mot_begin(void) {
-    result = (mot_result_t){0};
+    result = (mot_result_t){.session_id = session_current()->id};
     saved = false;
     training = true;
     trial = training_correct = 0;
@@ -173,7 +175,7 @@ bool mot_update(control_event_t event, uint64_t event_us) {
         break;
     case MOT_TRAINING_FAILED:
         if (event == CONTROL_CONFIRM) {
-            result = (mot_result_t){0}; // Retém somente a última rodada de treino.
+            result = (mot_result_t){.session_id = session_current()->id}; // Retém somente a última rodada de treino.
             trial = training_correct = 0;
             start_trial();
         }
@@ -192,3 +194,5 @@ void mot_serial_update(void) {
 
 mot_state_t mot_get_state(void) { return state; }
 const mot_result_t *mot_result(void) { return &result; }
+
+void mot_resume_after_pause(uint64_t delta_us) { interval_started_us += delta_us; }
