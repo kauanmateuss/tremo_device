@@ -72,3 +72,17 @@ bool mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], uint8_t address) {
     }
     return true;
 }
+
+// DLPF habilitado: taxa = 1000 / (1 + SMPLRT_DIV). Faixas: 2g e 250 dps.
+bool mpu6050_configure(uint8_t address, uint16_t sample_ms) {
+    if (sample_ms != 20 && sample_ms != 40) return false;
+    uint8_t identity, actual[4];
+    uint8_t expected[] = {(uint8_t)(sample_ms - 1), sample_ms == 20 ? 4 : 5, 0, 0};
+    if (!read_registers(address, 0x75, &identity, 1) || identity != 0x68) return false;
+    if (!write_register(address, REG_PWR_MGMT_1, 0x01)) return false; // PLL X gyro.
+    for (unsigned i = 0; i < 4; ++i)
+        if (!write_register(address, 0x19 + i, expected[i])) return false;
+    if (!read_registers(address, 0x19, actual, sizeof(actual))) return false;
+    for (unsigned i = 0; i < 4; ++i) if (actual[i] != expected[i]) return false;
+    return true;
+}

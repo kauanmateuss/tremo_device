@@ -47,11 +47,15 @@ void display_show_lines(const char *text[], size_t n) {
 }
 bool npInit(uint pin) { assert(pin == LED_PIN); return matrix_ok; }
 void mpu6050_setup_i2c(void) {}
+bool mpu6050_configure(uint8_t addr, uint16_t ms) { assert(ms == 20 || ms == 40); return healthy[addr - 0x68]; }
 bool mpu6050_reset(uint8_t addr) { assert(addr == 0x68 || addr == 0x69); return healthy[addr - 0x68]; }
 bool mpu6050_set_accel_range(uint8_t range, uint8_t addr) { assert(range == 0); return healthy[addr - 0x68]; }
 bool mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], uint8_t addr) {
     ++reads;
     if (!healthy[addr - 0x68]) return false;
+    if (app_get_state() == APP_CALIBRATING) {
+        accel[0] = accel[1] = gyro[0] = gyro[1] = gyro[2] = 0; accel[2] = 16384; return true;
+    }
     accel[0] = -32768; accel[1] = 32767; accel[2] = 16384;
     gyro[0] = -32768; gyro[1] = 32767; gyro[2] = 0;
     return true;
@@ -65,10 +69,16 @@ static void step(control_event_t e, uint32_t elapsed) {
     }
     app_update();
 }
+static void finish_calibration(void) {
+    assert(app_get_state() == APP_CALIBRATING);
+    step(CONTROL_NONE, 300);
+    for (unsigned i = 1; i < MONITORING_CAL_SAMPLES; ++i) step(CONTROL_NONE, session_config()->sample_ms);
+    assert(app_get_state() == APP_READY);
+}
 static void start_from_menu(void) {
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_INSTRUCTIONS);
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_PREPARING);
-    step(CONTROL_NONE, 5); assert(app_get_state() == APP_READY);
+    step(CONTROL_NONE, 5); finish_calibration();
     unsigned int before = reads;
     step(CONTROL_NONE, 100); assert(reads == before);
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_ACQUIRING);
@@ -88,7 +98,7 @@ int main(void) {
     step(CONTROL_NONE, 100); assert(app_get_state() == APP_SENSOR_ERROR);
     healthy[1] = true;
     step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 5);
-    assert(app_get_state() == APP_READY);
+    finish_calibration();
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_INSTRUCTIONS);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_MENU);
     // Todos os itens, incluindo a volta circular do joystick.
