@@ -230,8 +230,13 @@ outros testes já consumiram tempo na mesma sessão.
   Inicialize cada estrutura uma vez e libere `ram_buffer` com `free` ao descartá-la.
   O bitmap deve conter pelo menos `width * height / 8` bytes.
 
-O driver OLED ainda não propaga erros I2C para a aplicação. Sua inicialização
-não confirma a presença física do display.
+O OLED usa um prazo de 40 ms por quadro. Se a atualização falhar, o laço
+continua e a próxima atualização tenta redesenhar. Com o monitor USB aberto,
+`# OLED: falha I2C` indica falha de escrita nessa tela. Durante a aquisição
+com MQTT habilitado, `# COLETA` mostra a cada segundo o tempo ativo,
+as leituras válidas por MPU, a fila MQTT e os descartes de transmissão.
+Se a tela congelar, verifique se os contadores continuam avançando e se
+B abre a confirmação de parada. A inicialização não confirma a presença física do OLED.
 
 ## Compilação e validação na placa
 

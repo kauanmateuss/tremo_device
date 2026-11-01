@@ -66,11 +66,14 @@ void communication_update(bool allowed) {
     if (suspended) { suspended = false; retry_us = 0; }
     cyw43_arch_poll();
     uint64_t now = time_us_64();
-    if (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) != CYW43_LINK_UP) {
+    int link = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
+    if (link != CYW43_LINK_UP) {
         if (now >= wifi_retry_us) {
             mqtt_disconnect(client); inflight = connecting = false;
-            cyw43_arch_wifi_connect_async(TREMO_WIFI_SSID, TREMO_WIFI_PASSWORD,
+            printf("# WIFI tentativa link=%d\n", link);
+            int err = cyw43_arch_wifi_connect_async(TREMO_WIFI_SSID, TREMO_WIFI_PASSWORD,
                 TREMO_WIFI_PASSWORD[0] ? CYW43_AUTH_WPA2_AES_PSK : CYW43_AUTH_OPEN);
+            if (err) printf("# WIFI erro ao iniciar tentativa=%d\n", err);
             wifi_retry_us = now + 15000000;
         }
         return;

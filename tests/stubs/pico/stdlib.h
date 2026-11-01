@@ -4,6 +4,9 @@
 #include <stdint.h>
 typedef unsigned int uint;
 typedef uint64_t absolute_time_t;
+#define _u(x) x##u
+#define count_of(a) (sizeof(a)/sizeof((a)[0]))
+absolute_time_t make_timeout_time_us(uint64_t us);
 #define GPIO_IN 0
 #define GPIO_FUNC_I2C 3
 void gpio_set_function(uint pin, uint func);

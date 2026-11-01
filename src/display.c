@@ -2,6 +2,7 @@
 #include "hardware/i2c.h"
 #include "display.h"
 #include <string.h>
+#include <stdio.h>
 
 static uint8_t ssd[ssd1306_buffer_length], saved_screen[ssd1306_buffer_length];
 static struct render_area frame_area;
@@ -32,7 +33,7 @@ void display_init(void) {
 
     // limpa o buffer
     memset(ssd, 0, ssd1306_buffer_length);
-    render_on_display(ssd, &frame_area);
+    display_render();
 }
 
 
@@ -49,7 +50,7 @@ void display_show_lines(const char *text[], size_t count) {
         y += 8;
     }
 
-    render_on_display(ssd, &frame_area);
+    display_render();
 }
 
 
@@ -64,14 +65,19 @@ void display_draw_text(const char *text, uint8_t x, uint8_t y) {
 void clear_display(void) {
     if (!initialized) return;
     memset(ssd, 0, ssd1306_buffer_length);
-    render_on_display(ssd, &frame_area);
+    display_render();
 }
 
 
 // funcao para escrever no display
 void display_render(void) {
+    static bool reported_error;
     if (!initialized) return;
-    render_on_display(ssd, &frame_area);
+    bool ok = render_on_display(ssd, &frame_area);
+    if (!ok && !reported_error && stdio_usb_connected()) {
+        puts("# OLED: falha I2C ao atualizar a tela");
+        reported_error = true;
+    } else if (ok) reported_error = false;
 }
 
 void display_show_welcome(void) {

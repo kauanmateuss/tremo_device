@@ -27,7 +27,7 @@ static sensor_t sensors[2] = {
     {.address = MPU6050_ADDR_LOW},
     {.address = MPU6050_ADDR_HIGH}
 };
-static uint32_t next_sample_ms, started_ms;
+static uint32_t next_sample_ms, started_ms, last_progress_ms;
 static uint32_t paused_at_ms, paused_ms;
 static bool paused;
 static bool active, serial_connected, result_available;
@@ -168,6 +168,15 @@ void monitoring_serial_update(void) {
         if (result_available && !active) print_result();
     }
     serial_connected = connected;
+    if (active && !paused && connected && telemetry_enabled()) {
+        uint32_t now = to_ms_since_boot(get_absolute_time());
+        if (now - last_progress_ms >= 1000) {
+            last_progress_ms = now;
+            printf("# COLETA ms=%lu MPU1=%lu MPU2=%lu fila_mqtt=%u descartes_tx=%lu\n",
+                   (unsigned long)monitoring_elapsed_ms(now), (unsigned long)result.valid[0],
+                   (unsigned long)result.valid[1], telemetry_pending(), (unsigned long)telemetry_dropped());
+        }
+    }
     // Orçamento limitado; nenhuma formatação/USB dentro da leitura I2C.
     if (telemetry_enabled()) transmit_batch();
     else if (connected) {
@@ -184,7 +193,7 @@ void monitoring_start(uint32_t now_ms) {
     for (unsigned i = 0; i < 2; ++i) memcpy(result.gyro_bias[i], sensors[i].bias, sizeof(sensors[i].bias));
     queue_head = queue_count = 0; sequence = 0;
     paused = false; paused_ms = 0;
-    started_ms = next_sample_ms = now_ms;
+    last_progress_ms = started_ms = next_sample_ms = now_ms;
     active = true;
     for (int i = 0; i < 2; ++i) sensors[i].valid = false;
     if (stdio_usb_connected()) printf("# INICIO SESSAO\n");
