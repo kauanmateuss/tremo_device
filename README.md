@@ -1,12 +1,15 @@
 # Tremo Device — base de periféricos
 
-Projeto em C com Pico SDK para a BitDogLab. O módulo `monitoring.c` lê continuamente os dois MPUs e
-mostra os eixos do acelerômetro e do giroscópio no monitor USB e no OLED.
+Projeto em C com Pico SDK para a BitDogLab. Uma FSM gerencia o menu e as sessões de monitoramento dos dois MPUs,
+com saída no monitor USB e no OLED. Veja o [guia da task FSM](docs/fsm-monitoramento.md)
+para arquitetura, transições, compilação e critérios de aceitação.
 
 ## Organização
 
-- `main.c`: inicialização, boas-vindas por 2 segundos e loop principal.
-- `monitoring.h` / `monitoring.c`: aquisição, conversões, saída e recuperação dos sensores.
+- `main.c`: inicialização da aplicação e loop principal.
+- `app.h` / `app.c`: FSM, telas, menu e controle das sessões.
+- `controls.h` / `controls.c`: joystick, botões A/B, debounce e eventos.
+- `monitoring.h` / `monitoring.c`: preparação, aquisição, conversões e resultados.
 - `matrix.h` / `matrix.c`: buffer e envio para os 25 LEDs no GPIO 7.
 - `display.h` / `display.c`: interface simples de texto para o OLED 128×64.
 - `ssd1306.h`, `ssd1306_i2c.h` / `ssd1306_i2c.c`: driver do OLED.
@@ -26,43 +29,27 @@ Os dois MPUs compartilham SDA/SCL. Configure AD0 em nível baixo no primeiro e
 alto no segundo para obter endereços diferentes. Confira a ligação física antes
 de usar: a configuração de software não altera o endereço do sensor.
 
-## Monitoramento contínuo
+## Fluxo atual
 
-A `main.c` define a sequência da aplicação: inicializa serial e display, mostra
-as boas-vindas por 2 segundos, inicializa o monitoramento e executa seus ciclos.
-As funções de aquisição, conversão, saída e recuperação ficam em `monitoring.c`.
-`monitoring_update()` executa um ciclo bloqueante, incluindo a espera de amostragem.
+Ao ligar: inicializar periféricos → verificar sensores → boas-vindas → menu.
+O joystick seleciona, A confirma e B volta. As opções são tremores, cognitiva,
+completa e configurações/informações. Cognitiva e completa mostram EM BREVE.
 
-- Leitura dos dois sensores: intervalo alvo de 40 ms (aproximadamente 25 Hz por sensor).
-- OLED: atualização a cada 200 ms (aproximadamente 5 Hz).
-- Serial USB: uma linha CSV por sensor em cada ciclo, enquanto conectado.
-- Acelerômetro: faixa ±2 g. Giroscópio: faixa padrão após reset, ±250 graus/s.
-- Falhas aparecem como `ERRO`. A aplicação tenta reinicializar o sensor a cada 2 s.
-  Valores antigos não são exibidos como novas leituras.
+Para monitorar: instruções → A preparar → sensores OK → A iniciar → aquisição.
+Uma sessão dura 30 segundos. B solicita interrupção; A confirma e B continua.
+A coleta continua durante a confirmação. Uma falha de sensor encerra a sessão.
 
-Abra o monitor serial USB no Wokwi ou na placa. Uma saudação (linha iniciada por `#`) e o cabeçalho CSV são enviados ao detectar
-a conexão, inclusive se o monitor for aberto depois da inicialização:
+- Leitura com intervalo alvo de 40 ms; OLED atualizado a cada 200 ms.
+- Serial USB: CSV de aceleração (g) e giroscópio (graus/s), com timestamp.
+- OLED: eixos XYZ em mg e graus/s para cada sensor.
+- Resultados: duração, contagens válidas/falhas e motivo de término, em RAM e serial.
+- A nova sessão apaga o resumo anterior; desligar também. Não há armazenamento
+  permanente nem cálculo de frequência/intensidade dos tremores nesta etapa.
 
-```text
-tempo_ms,mpu,status,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps
-```
-
-O timestamp indica o término da tentativa de leitura de cada sensor, em
-milissegundos desde o boot. Linhas de erro deixam os seis campos de medição vazios.
-A UART foi desabilitada, pois seus GPIOs padrão 0 e 1 são usados pelo I2C0.
-
-No OLED, cada sensor ocupa quatro linhas: cabeçalho `MPU1 MG DPS` (ou MPU2),
-seguido de X, Y e Z. A primeira coluna numérica representa aceleração em mg
-(milésimos de g), e a segunda, velocidade angular em graus/s.
-
-Os dados ainda incluem gravidade, movimento voluntário e ruído. Esta etapa
-visualiza o movimento medido; não calcula frequência, amplitude ou classificação
-de tremor. Os sensores são lidos sequencialmente, sem sincronização.
-
-O agendamento é simples e bloqueante: I2C, USB e reinicializações podem alongar o
-intervalo entre amostras. Portanto, 25 Hz é uma meta, não uma frequência garantida.
-Para a futura análise de tremores será necessário configurar a filtragem e a taxa
-interna dos MPUs, calibrar e verificar a regularidade da aquisição.
+A aplicação utiliza um único núcleo e agendamento cooperativo. I2C e OLED são
+síncronos; a preparação dos dois MPUs leva aproximadamente 400 ms. Os intervalos
+são metas, não garantias de tempo real. A UART permanece desabilitada porque os
+GPIOs 0/1 estão reservados ao I2C0. A matriz é inicializada apagada.
 
 ## Contratos das funções
 
@@ -89,6 +76,7 @@ não confirma a presença física do display.
 ```sh
 cmake -S . -B build
 cmake --build build -j 4
+python3 tests/run_host_tests.py
 ```
 
 Requer Pico SDK, CMake e compilador ARM configurados. O firmware é gerado em
@@ -99,7 +87,7 @@ Próximas tarefas simples:
 1. Acender separadamente vermelho, verde e azul na matriz e conferir as cores.
 2. Exibir oito linhas no OLED e conferir o corte de textos longos.
 3. Variar aceleração e rotação de cada MPU no Wokwi e conferir serial e OLED.
-4. Desconectar um sensor, verificar `ERRO` e testar sua recuperação.
+4. Testar as transições e falhas usando os critérios do guia FSM.
 5. Medir os intervalos pelos timestamps e acrescentar calibração e filtragem
    antes da análise de movimento.
 

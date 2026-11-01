@@ -1,0 +1,137 @@
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include "app.h"
+#include "controls.h"
+#include "monitoring.h"
+#include "mpu6050_i2c.h"
+#include "matrix.h"
+
+static uint32_t clock_ms;
+static control_event_t input;
+static bool healthy[2] = {true, false};
+static bool usb;
+static unsigned int reads;
+static char screen[8][64];
+
+void stdio_init_all(void) {}
+bool stdio_usb_connected(void) { return usb; }
+absolute_time_t get_absolute_time(void) { return clock_ms; }
+uint32_t to_ms_since_boot(absolute_time_t t) { return (uint32_t)t; }
+void controls_init(void) {}
+control_event_t controls_poll(uint32_t now) { (void)now; control_event_t e = input; input = CONTROL_NONE; return e; }
+void display_init(void) {}
+void display_show_lines(const char *text[], size_t n) {
+    assert(n <= 8);
+    memset(screen, 0, sizeof(screen));
+    for (size_t i = 0; i < n; ++i) {
+        if (strlen(text[i]) > 15) fprintf(stderr, "Linha longa: %s\n", text[i]);
+        assert(strlen(text[i]) <= 15); // Não pode cortar instruções ou números.
+        strcpy(screen[i], text[i]);
+    }
+}
+bool npInit(uint pin) { assert(pin == LED_PIN); return true; }
+void mpu6050_setup_i2c(void) {}
+bool mpu6050_reset(uint8_t addr) { assert(addr == 0x68 || addr == 0x69); return healthy[addr - 0x68]; }
+bool mpu6050_set_accel_range(uint8_t range, uint8_t addr) { assert(range == 0); return healthy[addr - 0x68]; }
+bool mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], uint8_t addr) {
+    ++reads;
+    if (!healthy[addr - 0x68]) return false;
+    accel[0] = -32768; accel[1] = 32767; accel[2] = 16384;
+    gyro[0] = -32768; gyro[1] = 32767; gyro[2] = 0;
+    return true;
+}
+static void step(control_event_t e, uint32_t elapsed) {
+    input = e;
+    clock_ms += elapsed;
+    app_update();
+}
+static void start_from_menu(void) {
+    step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_INSTRUCTIONS);
+    step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_PREPARING);
+    step(CONTROL_NONE, 5); assert(app_get_state() == APP_READY);
+    unsigned int before = reads;
+    step(CONTROL_NONE, 100); assert(reads == before);
+    step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_ACQUIRING);
+}
+int main(void) {
+    app_init();
+    assert(app_get_state() == APP_WELCOME);
+    assert(strcmp(screen[5], "MPU2 FALHA") == 0);
+    unsigned int boot_reads = reads;
+    step(CONTROL_CONFIRM, 1999); assert(app_get_state() == APP_WELCOME);
+    step(CONTROL_NONE, 1); assert(app_get_state() == APP_MENU);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_MENU);
+    assert(reads == boot_reads); // Nada de aquisição no menu.
+    step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_INSTRUCTIONS);
+    step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 5);
+    assert(app_get_state() == APP_SENSOR_ERROR);
+    step(CONTROL_NONE, 100); assert(app_get_state() == APP_SENSOR_ERROR);
+    healthy[1] = true;
+    step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 5);
+    assert(app_get_state() == APP_READY);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_INSTRUCTIONS);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_MENU);
+    // Todos os itens, incluindo a volta circular do joystick.
+    step(CONTROL_UP, 5); step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_INFO);
+    step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5);
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_UNAVAILABLE);
+    assert(strcmp(screen[0], "AVAL COGNITIVA") == 0);
+    step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    assert(strcmp(screen[0], "AVAL COMPLETA") == 0);
+    step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5); step(CONTROL_DOWN, 5);
+    start_from_menu();
+    step(CONTROL_NONE, 0);
+    assert(strcmp(screen[1], "X-2000 -250.1") == 0);
+    assert(monitoring_result()->valid[0] == 1);
+    step(CONTROL_NONE, 39); assert(monitoring_result()->valid[0] == 1);
+    step(CONTROL_NONE, 1); assert(monitoring_result()->valid[0] == 2);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_STOP_CONFIRM);
+    step(CONTROL_NONE, 200);
+    assert(strcmp(screen[0], "ENCERRAR") == 0); // Aquisição não sobrescreve diálogo.
+    assert(monitoring_result()->valid[0] == 3);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_ACQUIRING);
+    step(CONTROL_BACK, 5); step(CONTROL_CONFIRM, 5);
+    assert(app_get_state() == APP_RESULTS);
+    assert(monitoring_result()->reason == MONITORING_INTERRUPTED);
+    unsigned int stopped_reads = reads;
+    step(CONTROL_NONE, 1000); assert(reads == stopped_reads);
+    usb = true; step(CONTROL_NONE, 5); // Publica resumo retido em RAM.
+    usb = false; step(CONTROL_CONFIRM, 5);
+    start_from_menu();
+    assert(monitoring_result()->valid[0] == 0); // Nova sessão limpa contagens.
+    step(CONTROL_NONE, 0);
+    for (uint32_t elapsed = 5; elapsed < MONITORING_DURATION_MS; elapsed += 5)
+        step(CONTROL_NONE, 5);
+    assert(monitoring_result()->valid[0] == 750);
+    step(CONTROL_NONE, 5);
+    assert(app_get_state() == APP_RESULTS);
+    assert(monitoring_result()->reason == MONITORING_COMPLETE);
+    assert(monitoring_result()->duration_ms == MONITORING_DURATION_MS);
+    step(CONTROL_BACK, 5);
+    start_from_menu();
+    healthy[1] = false;
+    step(CONTROL_NONE, 0);
+    assert(app_get_state() == APP_RESULTS);
+    assert(monitoring_result()->reason == MONITORING_SENSOR_ERROR);
+    assert(monitoring_result()->valid[0] == 1 && monitoring_result()->errors[1] == 1);
+    stopped_reads = reads;
+    step(CONTROL_NONE, 500); assert(reads == stopped_reads);
+    healthy[1] = true;
+    step(CONTROL_BACK, 5);
+    start_from_menu();
+    step(CONTROL_BACK, 0);
+    assert(app_get_state() == APP_STOP_CONFIRM);
+    step(CONTROL_NONE, MONITORING_DURATION_MS);
+    assert(app_get_state() == APP_RESULTS);
+    assert(monitoring_result()->reason == MONITORING_COMPLETE);
+    // A subtração de tempos também funciona quando o contador de ms dá a volta.
+    step(CONTROL_BACK, 5);
+    clock_ms = UINT32_MAX - 100;
+    start_from_menu();
+    step(CONTROL_NONE, 0);
+    step(CONTROL_NONE, MONITORING_DURATION_MS);
+    assert(app_get_state() == APP_RESULTS);
+    assert(monitoring_result()->duration_ms == MONITORING_DURATION_MS);
+    puts("PASS FSM: menu, preparo, inicio, interrupcao, conclusao, falha e resultados");
+}
