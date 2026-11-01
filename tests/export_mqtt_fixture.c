@@ -3,9 +3,11 @@
 #include "test_flow.c"
 #undef main
 #include "telemetry.h"
+#include "communication.h"
 void communication_init(void) { telemetry_init("0123456789abcdef", true); }
-void communication_update(bool allowed) {
-    if (!allowed) return;
+communication_status_t communication_status(void) { return COMM_ONLINE; }
+void communication_update(communication_mode_t mode) {
+    if (mode == COMM_SUSPENDED) return;
     while (telemetry_peek()) { puts(telemetry_peek()); telemetry_ack(); }
 }
 int main(void) {

@@ -12,6 +12,14 @@ suspende a conexão e o processamento da rede durante os testes cognitivos,
 retomando nos resultados. Não há aquisição MPU simultânea aos testes cognitivos.
 O impacto real do Wi-Fi na aquisição MPU ainda precisa ser medido na placa.
 
+Na tela **PRONTO**, depois da calibração, confira a linha de rede. Para ver a
+sessão ao vivo, aguarde **MQTT CONECTADO** antes de apertar A. **REDE AUSENTE**,
+**VER SENHA WIFI**, **WIFI SEM IP** e **AGUARDE MQTT** distinguem as etapas da
+conexão. É possível iniciar offline. Durante a calibração e aquisição, o firmware
+só atende uma conexão MQTT já estabelecida. Se a conexão cair ou não existir,
+adia novas tentativas até sair dessa fase; mensagens sem PUBACK continuam na
+fila limitada. Nesse caso parte das amostras pode não chegar ao computador.
+
 MQTT usa **QoS 1**, que admite reenvio: a mensagem sai da fila somente após PUBACK.
 A identidade `(device, session, seq)` permite eliminar duplicatas no computador.
 PUBACK confirma recepção pelo broker, não gravação no SQLite. Não usamos `retain`.

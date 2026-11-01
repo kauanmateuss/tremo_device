@@ -22,6 +22,20 @@ static app_state_t state;
 static unsigned int menu_option, cognitive_option, config_option;
 static uint32_t welcome_started_ms, last_display_ms;
 static bool matrix_ready;
+static communication_status_t ready_network;
+
+static void draw_ready(void) {
+    static const char *const labels[] = {
+        [COMM_NO_RADIO] = "SEM RADIO", [COMM_WIFI_WAIT] = "BUSCANDO WIFI",
+        [COMM_WIFI_NOT_FOUND] = "REDE AUSENTE", [COMM_WIFI_BAD_AUTH] = "VER SENHA WIFI",
+        [COMM_WIFI_NO_IP] = "WIFI SEM IP", [COMM_BROKER_WAIT] = "AGUARDE MQTT",
+        [COMM_ONLINE] = "MQTT CONECTADO"
+    };
+    ready_network = communication_status();
+    const char *lines[] = {"SENSORES OK", "PRONTO", labels[ready_network],
+                           "", "A INICIAR", "B VOLTAR"};
+    display_show_lines(lines, 6);
+}
 
 static uint32_t now_ms(void) {
     return to_ms_since_boot(get_absolute_time());
@@ -124,11 +138,9 @@ static void enter_state(app_state_t next) {
         const char *lines[] = {"CALIBRACAO", "MOVIMENTO FALHA", "APOIE OS MPUS", "", "A REPETIR", "B VOLTAR"};
         display_show_lines(lines, 6); break;
     }
-    case APP_READY: {
-        const char *lines[] = {"SENSORES OK", "PRONTO", "", "A INICIAR", "B VOLTAR"};
-        display_show_lines(lines, 5);
+    case APP_READY:
+        draw_ready();
         break;
-    }
     case APP_SENSOR_ERROR: {
         const char *lines[] = {"FALHA SENSOR", monitoring_sensor_ready(0) ? "MPU1 OK" : "MPU1 FALHA",
             monitoring_sensor_ready(1) ? "MPU2 OK" : "MPU2 FALHA", "VER SERIAL USB", "", "A TENTAR", "B VOLTAR"};
@@ -327,6 +339,7 @@ static void app_step(void) {
         else if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
         break;
     case APP_READY:
+        if (ready_network != communication_status()) draw_ready();
         if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
         else if (event == CONTROL_CONFIRM) {
             if (!evaluation_current()->active) session_begin(SESSION_TREMOR, time_us_64());
@@ -424,5 +437,9 @@ app_state_t app_get_state(void) {
 void app_update(void) {
     app_step();
     bool cognitive = state == APP_MOT || state == APP_RTI || state == APP_PRM || state == APP_PAL;
-    communication_update(!cognitive || assessment_finished());
+    communication_mode_t mode = COMM_NORMAL;
+    if (cognitive && !assessment_finished()) mode = COMM_SUSPENDED;
+    else if (state == APP_CALIBRATING || state == APP_ACQUIRING || state == APP_STOP_CONFIRM)
+        mode = COMM_STREAM_ONLY;
+    communication_update(mode);
 }

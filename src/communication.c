@@ -20,7 +20,7 @@ static mqtt_client_t *client;
 static struct mqtt_connect_client_info_t info;
 static ip_addr_t broker;
 static char client_id[24], topic[64];
-static bool ready, connecting, inflight, suspended;
+static bool ready, connecting, inflight, suspended, deferred;
 static uint64_t retry_us, wifi_retry_us, sent_us;
 static unsigned backoff_s = 1;
 static void retry(void) {
@@ -57,14 +57,42 @@ void communication_init(void) {
         .client_pass = TREMO_MQTT_USER[0] ? TREMO_MQTT_PASSWORD : NULL};
     ready = true;
 }
-void communication_update(bool allowed) {
+communication_status_t communication_status(void) {
+    if (!ready) return COMM_NO_RADIO;
+    switch (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA)) {
+    case CYW43_LINK_UP: return mqtt_client_is_connected(client) ? COMM_ONLINE : COMM_BROKER_WAIT;
+    case CYW43_LINK_NONET: return COMM_WIFI_NOT_FOUND;
+    case CYW43_LINK_BADAUTH: return COMM_WIFI_BAD_AUTH;
+    case CYW43_LINK_NOIP: return COMM_WIFI_NO_IP;
+    default: return COMM_WIFI_WAIT;
+    }
+}
+
+void communication_update(communication_mode_t mode) {
     if (!ready) return;
-    if (!allowed) {
+    if (mode == COMM_SUSPENDED) {
         if (!suspended) { mqtt_disconnect(client); inflight = connecting = false; suspended = true; }
         return; // Nenhum poll/IRQ de rede durante testes cognitivos (arquitetura poll).
     }
     if (suspended) { suspended = false; retry_us = 0; }
+    // Mesmo a associação "async" envia comandos síncronos ao rádio. Sem uma
+    // conexão utilizável, não entrar no driver durante a aquisição cronometrada.
+    if (mode == COMM_STREAM_ONLY && (deferred || communication_status() != COMM_ONLINE)) {
+        deferred = true;
+        return;
+    }
+    if (deferred) {
+        // A conexão pode ter expirado enquanto o poll ficou parado. O evento
+        // sem PUBACK continua na fila e será reenviado pela nova conexão.
+        mqtt_disconnect(client);
+        inflight = connecting = deferred = false;
+        retry_us = 0;
+    }
     cyw43_arch_poll();
+    if (mode == COMM_STREAM_ONLY && communication_status() != COMM_ONLINE) {
+        deferred = true;
+        return;
+    }
     uint64_t now = time_us_64();
     int link = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
     if (link != CYW43_LINK_UP) {
@@ -96,5 +124,6 @@ void communication_update(bool allowed) {
 }
 #else
 void communication_init(void) { telemetry_init("0000000000000000", false); }
-void communication_update(bool allowed) { (void)allowed; }
+communication_status_t communication_status(void) { return COMM_NO_RADIO; }
+void communication_update(communication_mode_t mode) { (void)mode; }
 #endif

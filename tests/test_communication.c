@@ -9,7 +9,7 @@ static uint64_t now;
 static mqtt_client_t network;
 static mqtt_connection_cb_t connect_cb;
 static mqtt_request_cb_t publish_cb;
-static unsigned polls, connects, publishes, disconnects;
+static unsigned joins, polls, connects, publishes, disconnects;
 static int link = CYW43_LINK_UP;
 static err_t publish_error;
 static char previous[TELEMETRY_PAYLOAD];
@@ -19,7 +19,7 @@ int cyw43_arch_init(void) { return 0; }
 void cyw43_arch_enable_sta_mode(void) {}
 void cyw43_arch_poll(void) { ++polls; }
 int cyw43_tcpip_link_status(int *s, int itf) { (void)s; (void)itf; return link; }
-int cyw43_arch_wifi_connect_async(const char *ssid, const char *password, uint32_t auth) { (void)ssid; (void)password; (void)auth; return 0; }
+int cyw43_arch_wifi_connect_async(const char *ssid, const char *password, uint32_t auth) { (void)ssid; (void)password; (void)auth; ++joins; return 0; }
 void pico_get_unique_board_id_string(char *out, unsigned n) { snprintf(out, n, "ABCDEF0123456789"); }
 int ipaddr_aton(const char *host, ip_addr_t *ip) { (void)ip; return !strcmp(host, "192.168.1.215"); }
 mqtt_client_t *mqtt_client_new(void) { return &network; }
@@ -39,25 +39,43 @@ err_t mqtt_publish(mqtt_client_t *c, const char *topic, const void *payload, uin
 static void connected(void) { network.connected = 1; connect_cb(&network, NULL, MQTT_CONNECT_ACCEPTED); }
 int main(void) {
     communication_init(); session_init(1); assert(session_begin(SESSION_MOT, 0));
-    communication_update(true); assert(connects == 1); connected();
-    communication_update(true); assert(publishes == 1 && telemetry_pending() == 1);
+    communication_update(COMM_NORMAL); assert(connects == 1); connected();
+    communication_update(COMM_NORMAL); assert(publishes == 1 && telemetry_pending() == 1);
     assert(strstr(previous, "abcdef0123456789"));
-    communication_update(true); assert(publishes == 1); // Aguarda PUBACK.
+    communication_update(COMM_NORMAL); assert(publishes == 1); // Aguarda PUBACK.
     unsigned before = polls;
-    communication_update(false); communication_update(false);
+    communication_update(COMM_SUSPENDED); communication_update(COMM_SUSPENDED);
     assert(polls == before && disconnects == 1 && telemetry_pending() == 1);
-    communication_update(true); assert(connects == 2); connected();
-    communication_update(true); assert(publishes == 2 && !strcmp(previous, telemetry_peek()));
+    communication_update(COMM_NORMAL); assert(connects == 2); connected();
+    communication_update(COMM_NORMAL); assert(publishes == 2 && !strcmp(previous, telemetry_peek()));
     publish_cb(NULL, ERR_OK); assert(telemetry_pending() == 0);
     session_finish(SESSION_COMPLETE, 1); publish_error = ERR_MEM;
-    communication_update(true); assert(telemetry_pending() == 1);
-    publish_error = ERR_OK; communication_update(true);
+    communication_update(COMM_NORMAL); assert(telemetry_pending() == 1);
+    publish_error = ERR_OK; communication_update(COMM_NORMAL);
     assert(telemetry_pending() == 1);
-    now += 16000000; communication_update(true); // Timeout conserva a mensagem.
+    now += 16000000; communication_update(COMM_NORMAL); // Timeout conserva a mensagem.
     assert(!network.connected && telemetry_pending() == 1);
-    before = connects; communication_update(true); assert(connects == before);
-    now += 1000000; communication_update(true); assert(connects == before + 1); connected();
-    communication_update(true); publish_cb(NULL, ERR_OK); assert(!telemetry_pending());
+    before = connects; communication_update(COMM_NORMAL); assert(connects == before);
+    now += 1000000; communication_update(COMM_NORMAL); assert(connects == before + 1); connected();
+    communication_update(COMM_NORMAL); publish_cb(NULL, ERR_OK); assert(!telemetry_pending());
+    // Sessão com rede saudável: publica normalmente. Se o link cair quando
+    // há um envio pendente, a aquisição segue sem reiniciar o rádio.
+    assert(session_begin(SESSION_TREMOR, now));
+    communication_update(COMM_STREAM_ONLY);
+    assert(communication_status() == COMM_ONLINE && publish_cb && telemetry_pending() == 1);
+    link = 0;
+    unsigned old_polls = polls, old_connects = connects;
+    for (unsigned i = 0; i < 61; ++i) {
+        now += 1000000;
+        communication_update(COMM_STREAM_ONLY);
+    }
+    assert(communication_status() != COMM_ONLINE && polls == old_polls && connects == old_connects && !joins);
+    assert(telemetry_pending() == 1);
+    communication_update(COMM_NORMAL); assert(joins == 1 && !publish_cb);
+    link = CYW43_LINK_UP;
+    communication_update(COMM_NORMAL); assert(connects == old_connects + 1); connected();
+    communication_update(COMM_NORMAL); assert(publish_cb && telemetry_pending() == 1);
+    publish_cb(NULL, ERR_OK); assert(!telemetry_pending());
     puts("PASS MQTT: ID, QoS, PUBACK, pausa, reenvio, memoria, timeout e reconexao");
     return 0;
 }
