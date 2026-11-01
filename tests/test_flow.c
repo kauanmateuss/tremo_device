@@ -9,6 +9,7 @@
 #include "mot.h"
 #include "rti.h"
 #include "prm.h"
+#include "pal.h"
 
 static uint32_t clock_ms;
 static control_event_t input;
@@ -119,6 +120,14 @@ int main(void) {
     assert(reads == before_prm);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    assert(app_get_state() == APP_PAL);
+    unsigned int before_pal = reads;
+    step(CONTROL_CONFIRM, 5); assert(pal_get_state() == PAL_ENCODING);
+    step(CONTROL_NONE, 2000);
+    step(CONTROL_BACK, 5); assert(pal_get_state() == PAL_RESULTS);
+    assert(reads == before_pal);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
     assert(app_get_state() == APP_COG_UNAVAILABLE);
     step(CONTROL_BACK, 5);
     step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
@@ -187,6 +196,9 @@ int main(void) {
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
     assert(app_get_state() == APP_PRM_ERROR);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    assert(app_get_state() == APP_PAL_ERROR);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     puts("PASS FSM: menu, preparo, inicio, interrupcao, conclusao, falha e resultados");
 }

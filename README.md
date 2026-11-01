@@ -3,7 +3,7 @@
 Projeto em C com Pico SDK para a BitDogLab. Uma FSM gerencia o menu e as sessões de monitoramento dos dois MPUs,
 com saída no monitor USB e no OLED. Veja o [guia da task FSM](docs/fsm-monitoramento.md)
 para arquitetura, transições, compilação e critérios de aceitação.
-O menu cognitivo oferece o [MOT adaptado](docs/mot-adaptado.md) e os testes RTI e PRM adaptados,
+O menu cognitivo oferece o [MOT adaptado](docs/mot-adaptado.md) e os testes RTI, PRM e PAL adaptados,
 com protocolos experimentais, treinamento e registros em RAM.
 
 ## Organização
@@ -14,6 +14,7 @@ com protocolos experimentais, treinamento e registros em RAM.
 - `mot.h` / `mot.c`: treinamento e avaliação MOT adaptada, resultados e exportação USB.
 - `rti.h` / `rti.c`: RTI por soltura do botão A, temporização e resultados.
 - `prm.h` / `prm.c`: memorização e reconhecimento entre duas alternativas.
+- `pal.h` / `pal.c`: associação de formas a posições, rodadas e níveis.
 - `patterns.h` / `patterns.c`: banco local de 16 formas 3×3 e embaralhamento.
 - `monitoring.h` / `monitoring.c`: preparação, aquisição, conversões e resultados.
 - `matrix.h` / `matrix.c`: buffer e envio para os 25 LEDs no GPIO 7.
@@ -39,8 +40,8 @@ de usar: a configuração de software não altera o endereço do sensor.
 
 Ao ligar: inicializar periféricos → verificar sensores → boas-vindas → menu.
 O joystick seleciona, A confirma e B volta. As opções são tremores, cognitiva,
-completa e configurações/informações. Cognitiva abre o submenu MOT/RTI/PRM/PAL/bateria. MOT, RTI e PRM estão implementados;
-as outras opções e a avaliação completa mostram EM BREVE.
+completa e configurações/informações. Cognitiva abre o submenu MOT/RTI/PRM/PAL/bateria. MOT, RTI, PRM e PAL estão implementados;
+a bateria e a avaliação completa mostram EM BREVE.
 
 Para monitorar: instruções → A preparar → sensores OK → A iniciar → aquisição.
 Uma sessão dura 30 segundos. B solicita interrupção; A confirma e B continua.
@@ -115,6 +116,40 @@ clínicos ou reconhecimento tardio. Não há coleta MPU durante o teste.
 Aceitação na placa: concluir treino e seis escolhas, provocar erro/omissão,
 interromper durante memorização e escolha e conferir OLED/CSV. Os testes no PC
 verificam esses fluxos, padrões distintos, balanceamento e limite de tempo.
+
+## PAL adaptado
+
+Cognitiva → PAL → A treinar → dois pares corretos → A iniciar → níveis de 2, 3 e 4 pares.
+Cada associação mostra uma forma verde central e seu canto azul durante 2 s,
+com intervalo apagado de 0,5 s. Após mais 1 s, as formas são consultadas em ordem
+sorteada: mova o cursor branco entre os quatro cantos pelo joystick e confirme A.
+A forma continua visível e nenhuma cor indica o canto correto. Cada escolha tem
+15 s; movimentos não reiniciam o prazo. B encerra em qualquer etapa.
+
+O treino exige acertar os dois pares; A repete se necessário. Na avaliação, acertar
+todos os pares de uma rodada libera o próximo nível, iniciado por A. Havendo erro
+ou omissão, A reapresenta as mesmas associações. Após três rodadas malsucedidas no
+nível, o teste encerra com `LIMITE ATINGIDO`. Níveis novos usam outras formas e
+posições sorteadas. As quatro posições são opções mesmo nos níveis de 2 e 3 pares.
+
+OLED mostra níveis concluídos, acertos, erros, omissões e rodadas iniciadas. CSV
+`PAL,...` registra fase, número de pares, rodada, tentativa, ID da forma, posição
+correta/escolhida, desfecho e tempos em microssegundos. Posições: 0 superior esquerda,
+1 superior direita, 2 inferior esquerda, 3 inferior direita; escolha vazia significa
+sem resposta. Treino não entra nas métricas. Até 29 registros ficam em RAM e são
+exportados após encerrar/reconectar USB, sem armazenamento permanente ou confirmação
+de entrega. Repetir treino substitui seus registros anteriores; iniciar outro PAL
+limpa a sessão. Interrupção durante uma escolha registra `aborted`, sem contar erro.
+
+A latência inclui decisão, movimento e debounce; precisa ser medida fisicamente.
+O banco e a apresentação são adaptações experimentais do conceito
+[PAL](https://cambridgecognition.com/paired-associates-learning-pal/), sem equivalência
+clínica ao CANTAB. Não há aquisição MPU simultânea, bateria automática ou pausa.
+
+Aceitação na placa: concluir os três níveis, provocar erro e conferir reapresentação
+das mesmas associações, atingir o limite de três rodadas, testar omissão e B durante
+memorização/escolha. Conferir contagens e posições no CSV. Os testes no PC incluem
+o caminho máximo de 29 registros e verificam que treino não entra nas métricas.
 
 ## Contratos das funções
 

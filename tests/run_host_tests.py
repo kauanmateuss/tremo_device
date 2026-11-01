@@ -7,11 +7,12 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 suites = {
     "controls": ["tests/test_controls.c", "src/controls.c"],
-    "flow": ["tests/test_flow.c", "src/app.c", "src/monitoring.c", "src/mot.c", "src/rti.c", "src/prm.c", "src/patterns.c"],
+    "flow": ["tests/test_flow.c", "src/app.c", "src/monitoring.c", "src/mot.c", "src/rti.c", "src/prm.c", "src/pal.c", "src/patterns.c"],
     "mot": ["tests/test_mot.c", "src/mot.c"],
     "rti": ["tests/test_rti.c", "src/rti.c"],
     "rti_input": ["tests/test_rti_input.c", "src/rti.c", "src/controls.c"],
     "prm": ["tests/test_prm.c", "src/prm.c", "src/patterns.c"],
+    "pal": ["tests/test_pal.c", "src/pal.c", "src/patterns.c"],
     "matrix": ["tests/test_matrix.c", "src/matrix.c"],
 }
 with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
@@ -65,4 +66,22 @@ with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
             assert evaluated[-1][7] == "omission" and evaluated[-1][6] == ""
             assert sum(int(row[5]) for row in evaluated) == 3
             assert result.stdout.count("# PRM_END records=8") == 1
+        if name == "pal":
+            rows = [line.split(",") for line in result.stdout.splitlines() if line.startswith("PAL,")]
+            assert len(rows) == 29 and all(len(row) == 11 for row in rows)
+            evaluated = [row for row in rows if row[1] == "test"]
+            assert len(evaluated) == 27
+            assert [row[8] for row in evaluated].count("correct") == 21
+            assert [row[8] for row in evaluated].count("wrong") == 5
+            assert [row[8] for row in evaluated].count("omission") == 1
+            for pairs in range(2, 5):
+                for attempt in range(1, 4):
+                    group = [row for row in evaluated if int(row[2]) == pairs and int(row[3]) == attempt]
+                    assert [row[4] for row in group] == [str(i) for i in range(1, pairs + 1)]
+            for row in evaluated:
+                if row[8] == "omission":
+                    assert row[7] == ""
+                else:
+                    assert (row[6] == row[7]) == (row[8] == "correct")
+            assert result.stdout.count("# PAL_END records=29") == 1
         print(result.stdout, end="")
