@@ -6,6 +6,7 @@
 #include "monitoring.h"
 #include "mot.h"
 #include "rti.h"
+#include "prm.h"
 #include "pico/stdlib.h"
 
 #define WELCOME_MS 2000
@@ -113,6 +114,9 @@ static void enter_state(app_state_t next) {
     case APP_RTI:
         rti_begin();
         break;
+    case APP_PRM:
+        prm_begin();
+        break;
     case APP_COG_UNAVAILABLE: {
         const char *names[] = {"MOT", "RTI", "PRM", "PAL", "BATERIA"};
         const char *lines[] = {names[cognitive_option], "EM BREVE", "", "B VOLTAR"};
@@ -120,8 +124,9 @@ static void enter_state(app_state_t next) {
         break;
     }
     case APP_MOT_ERROR:
-    case APP_RTI_ERROR: {
-        const char *lines[] = {"MATRIZ FALHOU", state == APP_MOT_ERROR ? "MOT BLOQUEADO" : "RTI BLOQUEADO", "", "B VOLTAR"};
+    case APP_RTI_ERROR:
+    case APP_PRM_ERROR: {
+        const char *lines[] = {"MATRIZ FALHOU", state == APP_MOT_ERROR ? "MOT BLOQUEADO" : state == APP_RTI_ERROR ? "RTI BLOQUEADO" : "PRM BLOQUEADO", "", "B VOLTAR"};
         display_show_lines(lines, 4);
         break;
     }
@@ -165,10 +170,16 @@ void app_update(void) {
         rti_serial_update();
         return; // Não executa MPU, MOT ou exportações de outros testes durante RTI.
     }
+    if (state == APP_PRM) {
+        if (prm_update(event, event_us)) enter_state(APP_COG_MENU);
+        prm_serial_update();
+        return; // Isola memorização/escolha de aquisições e exportações externas.
+    }
     monitoring_serial_update();
     if (state != APP_ACQUIRING && state != APP_STOP_CONFIRM) {
         mot_serial_update();
         rti_serial_update();
+        prm_serial_update();
     }
 
     switch (state) {
@@ -232,16 +243,19 @@ void app_update(void) {
         else if (event == CONTROL_CONFIRM) {
             if (cognitive_option == 0) enter_state(matrix_ready ? APP_MOT : APP_MOT_ERROR);
             else if (cognitive_option == 1) enter_state(matrix_ready ? APP_RTI : APP_RTI_ERROR);
+            else if (cognitive_option == 2) enter_state(matrix_ready ? APP_PRM : APP_PRM_ERROR);
             else enter_state(APP_COG_UNAVAILABLE);
         }
         break;
     case APP_COG_UNAVAILABLE:
     case APP_MOT_ERROR:
     case APP_RTI_ERROR:
+    case APP_PRM_ERROR:
         if (event == CONTROL_BACK) enter_state(APP_COG_MENU);
         break;
     case APP_MOT:
     case APP_RTI:
+    case APP_PRM:
         break; // Tratado antes deste switch para isolar a execução cronometrada.
     case APP_UNAVAILABLE:
     case APP_INFO:

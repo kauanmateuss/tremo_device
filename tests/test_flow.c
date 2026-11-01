@@ -8,6 +8,7 @@
 #include "matrix.h"
 #include "mot.h"
 #include "rti.h"
+#include "prm.h"
 
 static uint32_t clock_ms;
 static control_event_t input;
@@ -110,6 +111,14 @@ int main(void) {
     assert(reads == before_rti);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    assert(app_get_state() == APP_PRM);
+    unsigned int before_prm = reads;
+    step(CONTROL_CONFIRM, 5); assert(prm_get_state() == PRM_ENCODING);
+    step(CONTROL_NONE, 2000);
+    step(CONTROL_BACK, 5); assert(prm_get_state() == PRM_RESULTS);
+    assert(reads == before_prm);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
     assert(app_get_state() == APP_COG_UNAVAILABLE);
     step(CONTROL_BACK, 5);
     step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
@@ -175,6 +184,9 @@ int main(void) {
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
     assert(app_get_state() == APP_RTI_ERROR);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    assert(app_get_state() == APP_PRM_ERROR);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     puts("PASS FSM: menu, preparo, inicio, interrupcao, conclusao, falha e resultados");
 }

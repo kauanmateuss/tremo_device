@@ -3,7 +3,7 @@
 Projeto em C com Pico SDK para a BitDogLab. Uma FSM gerencia o menu e as sessões de monitoramento dos dois MPUs,
 com saída no monitor USB e no OLED. Veja o [guia da task FSM](docs/fsm-monitoramento.md)
 para arquitetura, transições, compilação e critérios de aceitação.
-O menu cognitivo oferece o [MOT adaptado](docs/mot-adaptado.md) e o RTI adaptado,
+O menu cognitivo oferece o [MOT adaptado](docs/mot-adaptado.md) e os testes RTI e PRM adaptados,
 com protocolos experimentais, treinamento e registros em RAM.
 
 ## Organização
@@ -13,6 +13,8 @@ com protocolos experimentais, treinamento e registros em RAM.
 - `controls.h` / `controls.c`: dois eixos do joystick, botões A/B, debounce e eventos.
 - `mot.h` / `mot.c`: treinamento e avaliação MOT adaptada, resultados e exportação USB.
 - `rti.h` / `rti.c`: RTI por soltura do botão A, temporização e resultados.
+- `prm.h` / `prm.c`: memorização e reconhecimento entre duas alternativas.
+- `patterns.h` / `patterns.c`: banco local de 16 formas 3×3 e embaralhamento.
 - `monitoring.h` / `monitoring.c`: preparação, aquisição, conversões e resultados.
 - `matrix.h` / `matrix.c`: buffer e envio para os 25 LEDs no GPIO 7.
 - `display.h` / `display.c`: interface simples de texto para o OLED 128×64.
@@ -37,7 +39,7 @@ de usar: a configuração de software não altera o endereço do sensor.
 
 Ao ligar: inicializar periféricos → verificar sensores → boas-vindas → menu.
 O joystick seleciona, A confirma e B volta. As opções são tremores, cognitiva,
-completa e configurações/informações. Cognitiva abre o submenu MOT/RTI/PRM/PAL/bateria. MOT e RTI estão implementados;
+completa e configurações/informações. Cognitiva abre o submenu MOT/RTI/PRM/PAL/bateria. MOT, RTI e PRM estão implementados;
 as outras opções e a avaliação completa mostram EM BREVE.
 
 Para monitorar: instruções → A preparar → sensores OK → A iniciar → aquisição.
@@ -90,6 +92,29 @@ Para aceitar a task na placa: gravar o UF2 via BOOTSEL, concluir treino e dez te
 provocar antecipação e omissão, conferir contagens/CSV e testar B durante a espera
 e após o verde. Os testes no PC cobrem esses fluxos e bordas temporais; não substituem
 a medição física da temporização.
+
+## PRM adaptado
+
+Cognitiva → PRM → A treinar → memorizar duas formas → reconhecer as duas → A iniciar.
+Na avaliação são seis formas: cada uma aparece por 2 s, com intervalo apagado de
+0,5 s. Após mais 1 s, os pares são perguntados na ordem inversa. Esquerda mostra
+opção 1, direita opção 2; veja ambas e confirme com A. O limite de 15 s começa
+na primeira alternativa e não reinicia ao alternar. B encerra em qualquer etapa.
+O treino exige dois acertos; se necessário, A repete. Treino e avaliação usam
+formas distintas, e os distratores não pertencem à sequência memorizada.
+
+Resultados: acertos, erros, omissões, acurácia e média de tempo dos acertos;
+treino separado. CSV `PRM,...` contém IDs de padrões do banco v1, alternativa correta,
+escolha (0/1; vazia sem resposta), desfecho e tempos em microssegundos. RAM e
+exportação ao concluir/reconectar USB seguem as mesmas limitações do RTI.
+A latência inclui navegação, atualização do OLED e debounce: não é reação pura.
+A apresentação alternada e as formas simples são adaptações locais do conceito
+[PRM](https://cambridgecognition.com/pattern-recognition-memory-prm/), sem escores
+clínicos ou reconhecimento tardio. Não há coleta MPU durante o teste.
+
+Aceitação na placa: concluir treino e seis escolhas, provocar erro/omissão,
+interromper durante memorização e escolha e conferir OLED/CSV. Os testes no PC
+verificam esses fluxos, padrões distintos, balanceamento e limite de tempo.
 
 ## Contratos das funções
 
