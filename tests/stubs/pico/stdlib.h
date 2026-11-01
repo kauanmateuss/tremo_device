@@ -5,6 +5,9 @@
 typedef unsigned int uint;
 typedef uint64_t absolute_time_t;
 #define GPIO_IN 0
+#define GPIO_FUNC_I2C 3
+void gpio_set_function(uint pin, uint func);
+void sleep_ms(uint32_t ms);
 #define NUM_BANK0_GPIOS 30
 void sleep_us(uint64_t us);
 void tight_loop_contents(void);

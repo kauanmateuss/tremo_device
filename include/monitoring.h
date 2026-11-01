@@ -17,8 +17,28 @@ typedef struct {
     uint32_t valid[2];
     uint32_t errors[2];
     monitoring_end_t reason;
+    uint32_t missed_slots, buffer_drops, max_lateness_ms, max_read_us, max_pair_skew_us;
+    int16_t gyro_bias[2][3];
+    uint16_t sample_ms;
+    bool calibrated;
 } monitoring_result_t;
 
+#define MONITORING_BUFFER_SIZE 256
+#define MONITORING_CAL_SAMPLES 50
+typedef enum { CAL_IDLE, CAL_RUNNING, CAL_OK, CAL_MOVING, CAL_SENSOR_ERROR } calibration_state_t;
+typedef struct {
+    uint64_t session_id, timestamp_us;
+    uint32_t sequence, read_us;
+    uint8_t sensor;
+    bool valid;
+    int16_t accel[3], gyro_raw[3];
+    int32_t gyro[3]; // Contagens corrigidas; dividir por 131 para graus/s.
+} monitoring_sample_t;
+void monitoring_calibration_begin(uint32_t now_ms);
+calibration_state_t monitoring_calibration_update(uint32_t now_ms);
+void monitoring_calibration_cancel(void);
+// Remove uma amostra da fila; um consumidor por vez (USB agora, MQTT futuramente).
+bool monitoring_pop(monitoring_sample_t *sample);
 void monitoring_init(void);
 // Preparação bloqueante (~400 ms com dois sensores), fora da aquisição.
 // Verifica comunicação e leitura de ambos. Não registra amostras da sessão.

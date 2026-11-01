@@ -89,6 +89,14 @@ static void enter_state(app_state_t next) {
         display_show_lines(lines, 3);
         break;
     }
+    case APP_CALIBRATING: {
+        const char *lines[] = {"CALIBRANDO", "APOIE OS MPUS", "MANTENHA IMOVEL", "", "B CANCELAR"};
+        display_show_lines(lines, 5); break;
+    }
+    case APP_CAL_ERROR: {
+        const char *lines[] = {"CALIBRACAO", "MOVIMENTO FALHA", "APOIE OS MPUS", "", "A REPETIR", "B VOLTAR"};
+        display_show_lines(lines, 6); break;
+    }
     case APP_READY: {
         const char *lines[] = {"SENSORES OK", "PRONTO", "", "A INICIAR", "B VOLTAR"};
         display_show_lines(lines, 5);
@@ -215,7 +223,22 @@ void app_update(void) {
         break;
     case APP_PREPARING:
         if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
-        else enter_state(monitoring_prepare() ? APP_READY : APP_SENSOR_ERROR);
+        else if (monitoring_prepare()) {
+            monitoring_calibration_begin(now_ms()); enter_state(APP_CALIBRATING);
+        } else enter_state(APP_SENSOR_ERROR);
+        break;
+    case APP_CALIBRATING:
+        if (event == CONTROL_BACK) { monitoring_calibration_cancel(); enter_state(APP_INSTRUCTIONS); }
+        else {
+            calibration_state_t c = monitoring_calibration_update(now);
+            if (c == CAL_OK) enter_state(APP_READY);
+            else if (c == CAL_MOVING) enter_state(APP_CAL_ERROR);
+            else if (c == CAL_SENSOR_ERROR) enter_state(APP_SENSOR_ERROR);
+        }
+        break;
+    case APP_CAL_ERROR:
+        if (event == CONTROL_CONFIRM) { monitoring_calibration_begin(now); enter_state(APP_CALIBRATING); }
+        else if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
         break;
     case APP_READY:
         if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);

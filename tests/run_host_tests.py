@@ -13,6 +13,8 @@ suites = {
     "rti_input": ["tests/test_rti_input.c", "src/rti.c", "src/controls.c"],
     "prm": ["tests/test_prm.c", "src/prm.c", "src/patterns.c"],
     "pal": ["tests/test_pal.c", "src/pal.c", "src/patterns.c"],
+    "monitoring": ["tests/test_monitoring.c", "src/monitoring.c"],
+    "mpu": ["tests/test_mpu.c", "src/mpu6050_i2c.c"],
     "session": ["tests/test_session.c"],
     "matrix": ["tests/test_matrix.c", "src/matrix.c"],
 }

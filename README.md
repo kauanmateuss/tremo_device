@@ -43,11 +43,11 @@ O joystick seleciona, A confirma e B volta. As opções são tremores, cognitiva
 completa e configurações/informações. Cognitiva abre o submenu MOT/RTI/PRM/PAL/bateria. MOT, RTI, PRM e PAL estão implementados;
 a bateria e a avaliação completa mostram EM BREVE.
 
-Para monitorar: instruções → A preparar → sensores OK → A iniciar → aquisição.
-Uma sessão dura 30 segundos. B solicita interrupção; A confirma e B continua.
+Para monitorar: instruções → A preparar → calibração imóvel → sensores OK → A iniciar → aquisição.
+Uma sessão dura 30 ou 60 segundos, conforme a configuração. B solicita interrupção; A confirma e B continua.
 A coleta continua durante a confirmação. Uma falha de sensor encerra a sessão.
 
-- Leitura com intervalo alvo de 40 ms; OLED atualizado a cada 200 ms.
+- Leitura com intervalo alvo de 20 ou 40 ms; OLED atualizado a cada 200 ms.
 - Serial USB: CSV de aceleração (g) e giroscópio (graus/s), com timestamp.
 - OLED: eixos XYZ em mg e graus/s para cada sensor.
 - Resultados: duração, contagens válidas/falhas e motivo de término, em RAM e serial.
@@ -161,6 +161,25 @@ O clique do joystick (GPIO 22) solicita pausa. A retoma e B encerra. Em MOT/RTI,
 a pausa aguarda o intervalo entre tentativas. Em PRM, aguarda o término do bloco;
 em PAL, o término da rodada. Assim, exposição, retenção e resposta não são congeladas.
 O monitoramento pausa imediatamente e exclui esse período da duração ativa.
+
+## Aquisição e calibração MPU
+
+O preparo verifica WHO_AM_I, configura e relê os registradores: ±2 g, ±250 graus/s,
+25 Hz com DLPF de 10 Hz ou 50 Hz com DLPF de 20 Hz. Referência: mapa de registradores
+[InvenSense](https://forum.arduino.cc/uploads/short-url/irIuOhPAskO6xY40ifvcP0HyV3H.pdf).
+A calibração usa 50 leituras por sensor após estabilização de 300 ms; exige apoio
+imóvel, verifica amplitude/variação e calcula apenas o bias do giroscópio. Não é
+calibração de escala em seis posições. A aceleração conserva a gravidade. B cancela;
+movimento permite repetir. Os limiares são experimentais e exigem verificação física.
+
+A agenda de amostragem mantém prazos fixos e conta os intervalos perdidos, sem
+inventar leituras atrasadas. Timestamp indica o início da leitura I2C, não o instante
+da conversão interna. Os dois MPUs são lidos sequencialmente. O resumo inclui
+`missed_slots`, `buffer_drops`, `max_lateness_ms`, duração I2C e separação entre sensores.
+A fila de 256 leituras em RAM é consumida pela USB (até duas por ciclo). Sem consumidor,
+a fila cheia descarta novas leituras e incrementa o contador. A próxima sessão limpa
+a fila; não há garantia de retenção de uma sessão inteira. MQTT utilizará essa API
+em uma etapa posterior. A atualização síncrona do OLED pode causar atrasos mensuráveis.
 
 ## Contratos das funções
 
