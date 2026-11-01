@@ -62,13 +62,13 @@ int main(void) {
     poll(2200); poll(2230);
     analog_x = 4095;
     poll(2250);
-    assert(poll(2280) == CONTROL_LEFT);
+    assert(poll(2280) == CONTROL_RIGHT);
     assert(poll(2400) == CONTROL_NONE);
     analog_x = 2048;
     poll(2420); poll(2450);
     analog_x = 0;
     poll(2460);
-    assert(poll(2490) == CONTROL_RIGHT);
+    assert(poll(2490) == CONTROL_LEFT);
     analog_x = 2048;
     poll(2500); poll(2530);
     analog = 4095; analog_x = 0; // Diagonal: vertical ganha.

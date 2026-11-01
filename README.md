@@ -167,9 +167,20 @@ O monitoramento pausa imediatamente e exclui esse período da duração ativa.
 
 ## Aquisição e calibração MPU
 
-O preparo verifica WHO_AM_I, configura e relê os registradores: ±2 g, ±250 graus/s,
-25 Hz com DLPF de 10 Hz ou 50 Hz com DLPF de 20 Hz. Referência: mapa de registradores
-[InvenSense](https://forum.arduino.cc/uploads/short-url/irIuOhPAskO6xY40ifvcP0HyV3H.pdf).
+O preparo lê `WHO_AM_I` em cada endereço I²C (`0x68` e `0x69`) para escolher a
+configuração do [MPU-6050](https://forum.arduino.cc/uploads/short-url/irIuOhPAskO6xY40ifvcP0HyV3H.pdf)
+ou do [MPU-6500](https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6500-Register-Map2.pdf).
+É normal ambos retornarem a mesma identidade: `0x70` identifica o MPU-6500.
+Nos dois modelos, o driver configura e relê as faixas de ±2 g e ±250 graus/s e
+a taxa de 25 ou 50 Hz, com filtro próximo de 10 ou 20 Hz, respectivamente.
+No MPU-6500, configura também o filtro separado do acelerômetro (`ACCEL_CONFIG2`).
+Se as boas-vindas mostram `MPU1 FALHA` ou `MPU2 FALHA`, a calibração ainda
+não começou. Abra o monitor serial USB e procure as linhas `# MPU 0x68:`
+ou `# MPU 0x69:`. O firmware conserva o erro do último preparo por endereço:
+falha de comunicação no reset, escrita/leitura de registrador, valor inesperado
+(com valor lido, esperado e máscara) ou falha na primeira amostra. Em
+**Monitoramento de tremores**, use **A TENTAR** na tela de falha para repetir.
+
 A calibração usa 50 leituras por sensor após estabilização de 300 ms; exige apoio
 imóvel, verifica amplitude/variação e calcula apenas o bias do giroscópio. Não é
 calibração de escala em seis posições. A aceleração conserva a gravidade. B cancela;

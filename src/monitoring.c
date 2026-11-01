@@ -16,6 +16,7 @@ typedef struct {
     uint8_t address;
     bool ready;
     bool valid;
+    char setup_error[MPU6050_DIAG_SIZE];
     uint32_t timestamp_ms;
     int16_t accel[3];
     int16_t gyro[3];
@@ -53,11 +54,23 @@ static void enqueue(const monitoring_sample_t *sample) {
 }
 
 static bool setup_sensor(sensor_t *sensor) {
-    sensor->valid = false;
-    sensor->ready = mpu6050_reset(sensor->address) &&
-                    mpu6050_configure(sensor->address, sample_ms) &&
-                    mpu6050_read_raw(sensor->accel, sensor->gyro, sensor->address);
+    sensor->valid = sensor->ready = false;
+    sensor->setup_error[0] = '\0';
+    if (!mpu6050_reset(sensor->address))
+        strcpy(sensor->setup_error, "falha I2C no reset/despertar (reg=0x6B)");
+    else if (mpu6050_configure(sensor->address, sample_ms, sensor->setup_error)) {
+        sensor->ready = mpu6050_read_raw(sensor->accel, sensor->gyro, sensor->address);
+        if (!sensor->ready)
+            strcpy(sensor->setup_error, "falha I2C na primeira amostra (reg=0x3B)");
+    }
     return sensor->ready;
+}
+
+// Mantém o último diagnóstico de preparo disponível para quem abrir o USB após o boot.
+static void print_setup_errors(void) {
+    for (unsigned i = 0; i < 2; ++i)
+        if (sensors[i].setup_error[0])
+            printf("# MPU 0x%02X: %s\n", sensors[i].address, sensors[i].setup_error);
 }
 
 static void print_sample(const monitoring_sample_t *sample) {
@@ -121,6 +134,7 @@ bool monitoring_prepare(void) {
     for (unsigned i = 0; i < 2; ++i) memset(sensors[i].bias, 0, sizeof(sensors[i].bias));
     bool first = setup_sensor(&sensors[0]);
     bool second = setup_sensor(&sensors[1]);
+    if (serial_connected) print_setup_errors();
     return first && second;
 }
 
@@ -149,6 +163,7 @@ void monitoring_serial_update(void) {
     bool connected = stdio_usb_connected();
     if (connected && !serial_connected) {
         printf("# Bem-vindo ao Tremo!\n");
+        print_setup_errors();
         printf("mpu,session_id,sequence,timestamp_us,sensor,valid,read_us,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n");
         if (result_available && !active) print_result();
     }

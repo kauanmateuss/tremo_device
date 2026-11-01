@@ -37,6 +37,8 @@ with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
             print(result.stderr, end="")
             result.check_returncode()
         if name == "flow":
+            assert "# MPU 0x69: falha I2C no reset" in result.stdout
+            assert "# MPU 0x68:" not in result.stdout
             assert "# RESULTADO motivo=1" in result.stdout
             assert result.stdout.count("# RESULTADO") == 1
         if name == "mot":
