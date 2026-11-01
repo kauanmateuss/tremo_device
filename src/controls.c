@@ -18,22 +18,27 @@ typedef struct {
     bool raw;
     bool stable;
     uint32_t changed_ms;
+    uint64_t changed_us;
+    uint64_t edge_us;
 } button_t;
 
 static button_t button_a, button_b;
 static int joystick_raw, joystick_stable;
 static uint32_t joystick_changed_ms;
 static bool joystick_armed;
+static bool confirm_settled;
 
-static bool pressed(button_t *button, uint pin, uint32_t now) {
+static bool update_button(button_t *button, uint pin, uint32_t now) {
     bool raw = !gpio_get(pin); // Pull-up: pressionado = nível baixo.
     if (raw != button->raw) {
         button->raw = raw;
         button->changed_ms = now;
+        button->changed_us = time_us_64();
     }
     if (raw != button->stable && now - button->changed_ms >= DEBOUNCE_MS) {
         button->stable = raw;
-        return raw; // Só gera evento na borda de pressionamento.
+        button->edge_us = button->changed_us;
+        return true; // Informa tanto pressionamento quanto soltura.
     }
     return false;
 }
@@ -48,6 +53,7 @@ void controls_init(void) {
     // Botão já segurado ao ligar não deve confirmar uma opção.
     button_a = (button_t){.raw = !gpio_get(BUTTON_A_PIN), .stable = !gpio_get(BUTTON_A_PIN)};
     button_b = (button_t){.raw = !gpio_get(BUTTON_B_PIN), .stable = !gpio_get(BUTTON_B_PIN)};
+    confirm_settled = false;
     adc_init();
     adc_gpio_init(JOYSTICK_Y_PIN);
     adc_gpio_init(JOYSTICK_X_PIN);
@@ -57,8 +63,10 @@ void controls_init(void) {
 }
 
 control_event_t controls_poll(uint32_t now_ms) {
-    bool a = pressed(&button_a, BUTTON_A_PIN, now_ms);
-    bool b = pressed(&button_b, BUTTON_B_PIN, now_ms);
+    bool a_changed = update_button(&button_a, BUTTON_A_PIN, now_ms);
+    bool b_changed = update_button(&button_b, BUTTON_B_PIN, now_ms);
+    confirm_settled = button_a.raw == button_a.stable &&
+                      now_ms - button_a.changed_ms >= DEBOUNCE_MS;
     adc_select_input(JOYSTICK_Y_ADC);
     uint16_t y = adc_read();
     adc_select_input(JOYSTICK_X_ADC);
@@ -88,7 +96,12 @@ control_event_t controls_poll(uint32_t now_ms) {
             joystick_armed = false;
         }
     }
-    if (b) return CONTROL_BACK;
-    if (a) return CONTROL_CONFIRM;
+    if (b_changed && button_b.stable) return CONTROL_BACK;
+    if (a_changed) return button_a.stable ? CONTROL_CONFIRM : CONTROL_CONFIRM_RELEASE;
     return event;
+}
+
+control_button_state_t controls_confirm_state(void) {
+    return (control_button_state_t){.pressed = button_a.stable,
+        .settled = confirm_settled, .edge_us = button_a.edge_us};
 }

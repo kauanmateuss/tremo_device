@@ -5,6 +5,7 @@
 #include "matrix.h"
 #include "monitoring.h"
 #include "mot.h"
+#include "rti.h"
 #include "pico/stdlib.h"
 
 #define WELCOME_MS 2000
@@ -109,14 +110,18 @@ static void enter_state(app_state_t next) {
     case APP_MOT:
         mot_begin();
         break;
+    case APP_RTI:
+        rti_begin();
+        break;
     case APP_COG_UNAVAILABLE: {
         const char *names[] = {"MOT", "RTI", "PRM", "PAL", "BATERIA"};
         const char *lines[] = {names[cognitive_option], "EM BREVE", "", "B VOLTAR"};
         display_show_lines(lines, 4);
         break;
     }
-    case APP_MOT_ERROR: {
-        const char *lines[] = {"MATRIZ FALHOU", "MOT BLOQUEADO", "", "B VOLTAR"};
+    case APP_MOT_ERROR:
+    case APP_RTI_ERROR: {
+        const char *lines[] = {"MATRIZ FALHOU", state == APP_MOT_ERROR ? "MOT BLOQUEADO" : "RTI BLOQUEADO", "", "B VOLTAR"};
         display_show_lines(lines, 4);
         break;
     }
@@ -155,8 +160,16 @@ void app_update(void) {
         mot_serial_update();
         return; // Nenhuma aquisição MPU nem saída do monitoramento durante o MOT.
     }
+    if (state == APP_RTI) {
+        if (rti_update(event, controls_confirm_state(), event_us)) enter_state(APP_COG_MENU);
+        rti_serial_update();
+        return; // Não executa MPU, MOT ou exportações de outros testes durante RTI.
+    }
     monitoring_serial_update();
-    if (state != APP_ACQUIRING && state != APP_STOP_CONFIRM) mot_serial_update();
+    if (state != APP_ACQUIRING && state != APP_STOP_CONFIRM) {
+        mot_serial_update();
+        rti_serial_update();
+    }
 
     switch (state) {
     case APP_WELCOME:
@@ -216,14 +229,19 @@ void app_update(void) {
         if (event == CONTROL_BACK) enter_state(APP_MENU);
         else if (event == CONTROL_UP) { cognitive_option = (cognitive_option + 4) % 5; show_cognitive_menu(); }
         else if (event == CONTROL_DOWN) { cognitive_option = (cognitive_option + 1) % 5; show_cognitive_menu(); }
-        else if (event == CONTROL_CONFIRM)
-            enter_state(cognitive_option == 0 ? (matrix_ready ? APP_MOT : APP_MOT_ERROR) : APP_COG_UNAVAILABLE);
+        else if (event == CONTROL_CONFIRM) {
+            if (cognitive_option == 0) enter_state(matrix_ready ? APP_MOT : APP_MOT_ERROR);
+            else if (cognitive_option == 1) enter_state(matrix_ready ? APP_RTI : APP_RTI_ERROR);
+            else enter_state(APP_COG_UNAVAILABLE);
+        }
         break;
     case APP_COG_UNAVAILABLE:
     case APP_MOT_ERROR:
+    case APP_RTI_ERROR:
         if (event == CONTROL_BACK) enter_state(APP_COG_MENU);
         break;
     case APP_MOT:
+    case APP_RTI:
         break; // Tratado antes deste switch para isolar a execução cronometrada.
     case APP_UNAVAILABLE:
     case APP_INFO:
