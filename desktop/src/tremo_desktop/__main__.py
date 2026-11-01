@@ -1,4 +1,4 @@
-"""Entrada da coleta e consulta local; a interface PySide6 virá em outra etapa."""
+"""Entradas independentes para coleta, consultas e dashboard desktop."""
 import argparse
 import json
 import logging
@@ -20,8 +20,17 @@ def main():
     report = commands.add_parser("report", help="consultar métricas e qualidade de uma sessão")
     report.add_argument("device")
     report.add_argument("session")
+    gui = commands.add_parser("gui", help="abrir dashboard desktop")
+    gui.add_argument("--demo", action="store_true", help="usar dados simulados em banco temporário")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    if args.command == "gui":
+        try:
+            from tremo_desktop.ui.app import run_dashboard
+        except ImportError:
+            logging.error('Instale a interface: python -m pip install -e "desktop[gui]"')
+            return 1
+        return run_dashboard(args.db, demo=args.demo)
     repository = None
     try:
         repository = Repository(args.db)

@@ -1,8 +1,10 @@
 # Coletor e armazenamento desktop
 
 Fluxo: BitDogLab/Pico W → Wi-Fi/MQTT → Mosquitto → Paho MQTT → SQLite.
-Esta etapa implementa recepção, armazenamento e consultas de métricas. A interface
-PySide6/PyQtGraph será a próxima etapa; ainda não há janela gráfica.
+A aplicação inclui recepção, armazenamento, consultas de métricas e
+[dashboard PySide6/PyQtGraph](DASHBOARD.md). Para explorar a interface, instale
+`python -m pip install -e 'desktop[gui]'` e execute
+`python -m tremo_desktop gui --demo`. Para dados reais, use `--db ARQUIVO gui`.
 
 ## Executar
 
@@ -35,8 +37,8 @@ python -m tremo_desktop --db desktop/tremo.sqlite3 sessions
 python -m tremo_desktop --db desktop/tremo.sqlite3 report ID_DA_PLACA ID_DA_SESSAO
 ```
 
-Os IDs vêm da primeira consulta. Estes comandos são ferramentas de inspeção da
-integração; a apresentação para profissionais será feita pela interface gráfica.
+Os IDs vêm da primeira consulta. Estes comandos são ferramentas de inspeção;
+a apresentação visual está disponível pelo comando `gui`.
 
 ## Organização e garantias
 
@@ -46,8 +48,8 @@ integração; a apresentação para profissionais será feita pela interface gr�
 - `storage/repository.py`: SQLite, esquema versionado, transações e consultas.
 
 O coletor roda como processo independente; callbacks e banco usam uma única thread.
-Não há widgets nos callbacks. A futura GUI consultará o banco em sua camada de
-serviços, sem executar recepção de rede na thread gráfica. SQLite usa WAL para
+Não há widgets nos callbacks. A GUI consulta o banco em uma thread de leitura,
+sem executar recepção de rede na thread gráfica. SQLite usa WAL para
 permitir leitura durante a coleta, com `synchronous=FULL` para os commits.
 
 `events` preserva o JSON aceito; `sessions`, `trials`, `samples` e `results` guardam
@@ -59,7 +61,7 @@ Erro de disco/banco encerra o coletor sem ACK: corrija a causa e reinicie.
 
 A sessão guarda horário UTC de recepção separado do relógio monotônico da placa.
 Não se associa automaticamente um registro a uma pessoa pelo horário ou por IP;
-a identificação do participante será definida na etapa da interface.
+o vínculo entre participante e sessão ficará para uma task específica.
 
 ## Dados preparados para o dashboard
 
@@ -75,7 +77,7 @@ entre registros e resumos. Sessão interrompida é distinta de sessão concluíd
 `quality.complete` descreve integridade dos dados, não conclusão da avaliação.
 Ainda não calculamos frequência/intensidade clínica do tremor ou escores normativos.
 
-Direção para a próxima task da interface:
+Disponível no dashboard:
 
 1. Visão geral de sessões com estado, duração e qualidade em destaque.
 2. Cartões de desempenho por teste, incluindo treino separado, erros e omissões.

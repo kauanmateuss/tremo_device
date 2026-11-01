@@ -251,5 +251,6 @@ Tasks 05, 10 e 12 têm implementação de firmware. Task 13 possui testes automa
 [protocolo de bancada](docs/validacao-tecnica.md) e verificador de capturas; medições
 físicas, usabilidade e repetibilidade ainda pendentes. Task 11 agora inclui
 [publicação MQTT no firmware](docs/mqtt.md) e
-[coletor Python com SQLite e consultas de métricas](desktop/README.md). A interface
-PySide6/PyQtGraph será implementada na próxima etapa. Usar branches `feature/...` para novas tasks.
+[coletor Python com SQLite](desktop/README.md). O
+[dashboard desktop PySide6/PyQtGraph](desktop/DASHBOARD.md) apresenta sessões, métricas
+cognitivas, gráficos dos dois MPUs e qualidade da coleta. Usar branches `feature/...` para novas tasks.
