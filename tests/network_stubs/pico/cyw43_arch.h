@@ -1,6 +1,9 @@
 #include <stdint.h>
 #define CYW43_ITF_STA 0
 #define CYW43_LINK_UP 3
+#define CYW43_LINK_NOIP 2
+#define CYW43_LINK_NONET (-2)
+#define CYW43_LINK_BADAUTH (-3)
 #define CYW43_AUTH_WPA2_AES_PSK 1
 #define CYW43_AUTH_OPEN 0
 extern int cyw43_state;
