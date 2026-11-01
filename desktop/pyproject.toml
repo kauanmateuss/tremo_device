@@ -9,6 +9,9 @@ description = "Recepção MQTT e armazenamento de sessões do Tremo"
 requires-python = ">=3.11"
 dependencies = ["paho-mqtt>=2.1,<3"]
 
+[project.optional-dependencies]
+gui = ["PySide6>=6.8,<7", "pyqtgraph>=0.13.7,<0.15"]
+
 [project.scripts]
 tremo = "tremo_desktop.__main__:main"
 

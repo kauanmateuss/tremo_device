@@ -46,17 +46,28 @@ def utc_now():
 
 
 class Repository:
-    def __init__(self, path):
-        if str(path) != ":memory:": Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(path, timeout=5)
+    def __init__(self, path, *, read_only=False):
+        if read_only:
+            uri = Path(path).resolve().as_uri() + "?mode=ro"
+            self.db = sqlite3.connect(uri, uri=True, timeout=1)
+        else:
+            if str(path) != ":memory:":
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+            self.db = sqlite3.connect(path, timeout=5)
         self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA foreign_keys=ON")
-        self.db.execute("PRAGMA journal_mode=WAL")
-        self.db.execute("PRAGMA synchronous=FULL")
-        version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if version not in (0, 1):
-            self.db.close(); raise RuntimeError("Versão do banco não suportada")
-        if version == 0: self.db.executescript("BEGIN;" + SCHEMA + "COMMIT;")
+        try:
+            self.db.execute("PRAGMA foreign_keys=ON")
+            version = self.db.execute("PRAGMA user_version").fetchone()[0]
+            if version not in ((1,) if read_only else (0, 1)):
+                raise RuntimeError("Versão do banco não suportada")
+            if not read_only:
+                self.db.execute("PRAGMA journal_mode=WAL")
+                self.db.execute("PRAGMA synchronous=FULL")
+                if version == 0:
+                    self.db.executescript("BEGIN;" + SCHEMA + "COMMIT;")
+        except Exception:
+            self.db.close()
+            raise
 
     def close(self):
         self.db.close()
@@ -160,3 +171,22 @@ class Repository:
         return [dict(sequence=r[0], t_us=r[1], valid=bool(r[2]),
                      acceleration_g=[v / 16384 if v is not None else None for v in r[3:6]],
                      angular_velocity_dps=[v / 131 if v is not None else None for v in r[6:9]]) for r in rows]
+
+    def dashboard_sessions(self, query="", state=None, limit=200):
+        # A pesquisa é feita no banco inteiro antes de limitar a lista visível.
+        rows = self.db.execute(
+            "SELECT device,session,received_first,received_last,state,start_json FROM sessions "
+            "WHERE (instr(device,?)>0 OR instr(session,?)>0) AND (? IS NULL OR state=?) "
+            "ORDER BY received_first DESC,device,session LIMIT ?",
+            (query.lower(), query.lower(), state, state, limit))
+        return [dict(row) for row in rows]
+
+    def trial_details(self, device, session):
+        return [json.loads(row[0]) for row in self.db.execute(
+            "SELECT data FROM trials WHERE device=? AND session=? ORDER BY module,trial_index",
+            (device, session))]
+
+    def sample_counts(self, device, session):
+        return {row[0]: row[1] for row in self.db.execute(
+            "SELECT sensor,count(*) FROM samples WHERE device=? AND session=? GROUP BY sensor",
+            (device, session))}
