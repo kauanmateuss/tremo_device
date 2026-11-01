@@ -151,6 +151,17 @@ das mesmas associações, atingir o limite de três rodadas, testar omissão e B
 memorização/escolha. Conferir contagens e posições no CSV. Os testes no PC incluem
 o caminho máximo de 29 registros e verificam que treino não entra nas métricas.
 
+## Sessões e configuração
+
+Cada execução recebe um ID de 64 bits (nonce do boot + contador). Esse ID acompanha
+os resultados e o cabeçalho serial `SESSION`; não contém dados do paciente.
+Configurações permite escolher 30/60 s e 25/50 Hz para tremores; A altera e B volta.
+A configuração fica em RAM e é copiada ao iniciar a sessão.
+O clique do joystick (GPIO 22) solicita pausa. A retoma e B encerra. Em MOT/RTI,
+a pausa aguarda o intervalo entre tentativas. Em PRM, aguarda o término do bloco;
+em PAL, o término da rodada. Assim, exposição, retenção e resposta não são congeladas.
+O monitoramento pausa imediatamente e exclui esse período da duração ativa.
+
 ## Contratos das funções
 
 - `npInit` retorna `bool`; repetir com o mesmo pino não reserva outra máquina PIO.

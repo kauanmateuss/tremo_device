@@ -3,7 +3,7 @@
 #include "controls.h"
 #include "pico/stdlib.h"
 
-static bool level_a = true, level_b = true;
+static bool level_a = true, level_b = true, level_sw = true;
 static uint16_t analog = 2048, analog_x = 2048;
 static uint adc_input;
 static uint64_t clock_us;
@@ -12,10 +12,10 @@ static control_event_t poll(uint32_t now) {
     clock_us = (uint64_t)now * 1000;
     return controls_poll(now);
 }
-void gpio_init(uint pin) { assert(pin == 5 || pin == 6); }
+void gpio_init(uint pin) { assert(pin == 5 || pin == 6 || pin == 22); }
 void gpio_set_dir(uint pin, bool out) { (void)pin; assert(!out); }
 void gpio_pull_up(uint pin) { (void)pin; }
-bool gpio_get(uint pin) { return pin == 5 ? level_a : level_b; }
+bool gpio_get(uint pin) { return pin == 5 ? level_a : pin == 6 ? level_b : level_sw; }
 void adc_init(void) {}
 void adc_gpio_init(uint pin) { assert(pin == 26 || pin == 27); }
 void adc_select_input(uint input) { assert(input < 2); adc_input = input; }
@@ -44,7 +44,7 @@ int main(void) {
     level_a = level_b = false;
     assert(poll(1050) == CONTROL_NONE);
     assert(poll(1080) == CONTROL_BACK); // B tem prioridade.
-    level_a = level_b = true;
+    level_a = level_b = true, level_sw = true;
     poll(1100); poll(1130);
     analog = 4095;
     assert(poll(1200) == CONTROL_NONE);
@@ -78,5 +78,8 @@ int main(void) {
     level_a = false;
     controls_init(); // Já segurado ao ligar: não dispara.
     assert(poll(3000) == CONTROL_NONE);
+    level_sw = false; poll(3100);
+    assert(poll(3130) == CONTROL_PAUSE);
+    assert(poll(3200) == CONTROL_NONE);
     puts("PASS controles: debounce, prioridade, repeticao e centro do joystick");
 }

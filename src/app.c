@@ -9,13 +9,16 @@
 #include "prm.h"
 #include "pal.h"
 #include "pico/stdlib.h"
+#include "pico/rand.h"
+#include "session.h"
+#include "assessment.h"
 
 #define WELCOME_MS 2000
 #define DISPLAY_MS 200
 
 static app_state_t state;
-static unsigned int menu_option, cognitive_option;
-static uint32_t welcome_started_ms, session_started_ms, last_display_ms;
+static unsigned int menu_option, cognitive_option, config_option;
+static uint32_t welcome_started_ms, last_display_ms;
 static bool matrix_ready;
 
 static uint32_t now_ms(void) {
@@ -53,6 +56,14 @@ static void show_results(void) {
     display_show_lines(lines, 8);
 }
 
+static void show_config(void) {
+    char duration[24], rate[24];
+    snprintf(duration, sizeof(duration), "%cTEMPO %lu S", config_option == 0 ? '-' : ' ', (unsigned long)(session_config()->duration_ms / 1000));
+    snprintf(rate, sizeof(rate), "%cTAXA %u HZ", config_option == 1 ? '-' : ' ', 1000 / session_config()->sample_ms);
+    const char *lines[] = {"CONFIGURACOES", duration, rate, "A ALTERAR", "B MENU", "", "CLIQUE JOYSTICK", "SOLICITA PAUSA"};
+    display_show_lines(lines, 8);
+}
+
 // A entrada em um estado desenha a tela uma vez. Só a aquisição atualiza periodicamente.
 static void enter_state(app_state_t next) {
     state = next;
@@ -69,7 +80,7 @@ static void enter_state(app_state_t next) {
         show_menu();
         break;
     case APP_INSTRUCTIONS: {
-        const char *lines[] = {"MONITORAMENTO", "AJUSTE SENSORES", "EM REPOUSO", "SESSAO 30 S", "", "B PEDE PARADA", "A PREPARAR", "B MENU"};
+        const char *lines[] = {"MONITORAMENTO", "AJUSTE SENSORES", "EM REPOUSO", "TEMPO EM CONFIG", "", "B PEDE PARADA", "A PREPARAR", "B MENU"};
         display_show_lines(lines, 8);
         break;
     }
@@ -110,16 +121,20 @@ static void enter_state(app_state_t next) {
         show_cognitive_menu();
         break;
     case APP_MOT:
-        mot_begin();
+        session_begin(SESSION_MOT, time_us_64());
+        assessment_begin(0);
         break;
     case APP_RTI:
-        rti_begin();
+        session_begin(SESSION_RTI, time_us_64());
+        assessment_begin(1);
         break;
     case APP_PRM:
-        prm_begin();
+        session_begin(SESSION_PRM, time_us_64());
+        assessment_begin(2);
         break;
     case APP_PAL:
-        pal_begin();
+        session_begin(SESSION_PAL, time_us_64());
+        assessment_begin(3);
         break;
     case APP_COG_UNAVAILABLE: {
         const char *names[] = {"MOT", "RTI", "PRM", "PAL", "BATERIA"};
@@ -135,28 +150,30 @@ static void enter_state(app_state_t next) {
         display_show_lines(lines, 4);
         break;
     }
-    case APP_INFO: {
-        const char *lines[] = {"CONFIG E INFO", "TREMO V0.1", "SESSAO 30 S", "LEITURA 40 MS", "OLED 200 MS",
-            matrix_ready ? "MATRIZ OK" : "MATRIZ FALHA", "CONFIG FIXA", "B MENU"};
-        display_show_lines(lines, 8);
-        break;
+    case APP_PAUSED: {
+        const char *lines[] = {"SESSAO PAUSADA", "", "A CONTINUAR", "B ENCERRAR"};
+        display_show_lines(lines, 4); break;
     }
+    case APP_INFO:
+        show_config(); break;
     }
 }
 
 static void finish_session(monitoring_end_t reason) {
     monitoring_stop(now_ms(), reason);
+    session_finish(reason == MONITORING_COMPLETE ? SESSION_COMPLETE : reason == MONITORING_INTERRUPTED ? SESSION_INTERRUPTED : SESSION_ERROR, time_us_64());
     enter_state(APP_RESULTS);
 }
 
 void app_init(void) {
     stdio_init_all();
+    session_init(get_rand_32());
     controls_init();
     display_init();
     matrix_ready = npInit(LED_PIN); // Inicializa apagada.
     monitoring_init();
     monitoring_prepare(); // Ausência de sensor não impede acessar o menu.
-    menu_option = cognitive_option = 0;
+    menu_option = cognitive_option = config_option = 0;
     enter_state(APP_WELCOME);
 }
 
@@ -165,25 +182,11 @@ void app_update(void) {
     control_event_t event = controls_poll(now);
     // Captura o instante após aceitar o evento, antes de qualquer saída serial/OLED.
     uint64_t event_us = time_us_64();
-    if (state == APP_MOT) {
-        if (mot_update(event, event_us)) enter_state(APP_COG_MENU);
-        mot_serial_update();
-        return; // Nenhuma aquisição MPU nem saída do monitoramento durante o MOT.
-    }
-    if (state == APP_RTI) {
-        if (rti_update(event, controls_confirm_state(), event_us)) enter_state(APP_COG_MENU);
-        rti_serial_update();
-        return; // Não executa MPU, MOT ou exportações de outros testes durante RTI.
-    }
-    if (state == APP_PRM) {
-        if (prm_update(event, event_us)) enter_state(APP_COG_MENU);
-        prm_serial_update();
-        return; // Isola memorização/escolha de aquisições e exportações externas.
-    }
-    if (state == APP_PAL) {
-        if (pal_update(event, event_us)) enter_state(APP_COG_MENU);
-        pal_serial_update();
-        return; // Não mistura aquisição MPU ou exportações com a avaliação.
+    if (state == APP_MOT || state == APP_RTI || state == APP_PRM || state == APP_PAL) {
+        bool leave = assessment_update(event, event_us);
+        if (assessment_finished()) session_finish(assessment_interrupted() ? SESSION_INTERRUPTED : SESSION_COMPLETE, time_us_64());
+        if (leave) enter_state(APP_COG_MENU);
+        return;
     }
     monitoring_serial_update();
     if (state != APP_ACQUIRING && state != APP_STOP_CONFIRM) {
@@ -217,8 +220,8 @@ void app_update(void) {
     case APP_READY:
         if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
         else if (event == CONTROL_CONFIRM) {
-            session_started_ms = now_ms();
-            monitoring_start(session_started_ms);
+            session_begin(SESSION_TREMOR, time_us_64());
+            monitoring_start(now_ms());
             enter_state(APP_ACQUIRING);
         }
         break;
@@ -232,9 +235,12 @@ void app_update(void) {
             finish_session(MONITORING_INTERRUPTED);
             break;
         }
-        if (now - session_started_ms >= MONITORING_DURATION_MS) {
+        if (session_active_us(time_us_64()) >= (uint64_t)session_current()->config.duration_ms * 1000) {
             finish_session(MONITORING_COMPLETE);
             break;
+        }
+        if (event == CONTROL_PAUSE) {
+            monitoring_pause(now); session_pause(time_us_64()); enter_state(APP_PAUSED); break;
         }
         if (event == CONTROL_BACK)
             enter_state(state == APP_ACQUIRING ? APP_STOP_CONFIRM : APP_ACQUIRING);
@@ -242,6 +248,12 @@ void app_update(void) {
         if (state == APP_ACQUIRING && now - last_display_ms >= DISPLAY_MS) {
             monitoring_draw();
             last_display_ms = now;
+        }
+        break;
+    case APP_PAUSED:
+        if (event == CONTROL_BACK) finish_session(MONITORING_INTERRUPTED);
+        else if (event == CONTROL_CONFIRM) {
+            session_resume(time_us_64()); monitoring_resume(now); enter_state(APP_ACQUIRING);
         }
         break;
     case APP_RESULTS:
@@ -271,8 +283,16 @@ void app_update(void) {
     case APP_PRM:
     case APP_PAL:
         break; // Tratado antes deste switch para isolar a execução cronometrada.
-    case APP_UNAVAILABLE:
     case APP_INFO:
+        if (event == CONTROL_UP || event == CONTROL_DOWN) { config_option ^= 1; show_config(); }
+        else if (event == CONTROL_CONFIRM) {
+            session_config_t c = *session_config();
+            if (config_option == 0) c.duration_ms = c.duration_ms == 30000 ? 60000 : 30000;
+            else c.sample_ms = c.sample_ms == 40 ? 20 : 40;
+            session_configure(c); show_config();
+        } else if (event == CONTROL_BACK) enter_state(APP_MENU);
+        break;
+    case APP_UNAVAILABLE:
         if (event == CONTROL_BACK) enter_state(APP_MENU);
         break;
     }

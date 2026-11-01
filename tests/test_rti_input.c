@@ -13,7 +13,7 @@ uint32_t get_rand_32(void) { return 0; }
 void gpio_init(uint pin) { (void)pin; }
 void gpio_set_dir(uint pin, bool out) { (void)pin; (void)out; }
 void gpio_pull_up(uint pin) { (void)pin; }
-bool gpio_get(uint pin) { return pin == 5 ? a_high : b_high; }
+bool gpio_get(uint pin) { return pin == 5 ? a_high : pin == 6 ? b_high : true; }
 void adc_init(void) {}
 void adc_gpio_init(uint pin) { (void)pin; }
 void adc_select_input(uint input) { (void)input; }

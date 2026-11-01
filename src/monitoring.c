@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "monitoring.h"
+#include "session.h"
 #include "pico/stdlib.h"
 #include "display.h"
 #include "mpu6050_i2c.h"
@@ -21,6 +22,8 @@ static sensor_t sensors[2] = {
     {.address = MPU6050_ADDR_HIGH}
 };
 static uint32_t next_sample_ms, started_ms;
+static uint32_t paused_at_ms, paused_ms;
+static bool paused;
 static bool active, serial_connected, result_available;
 static monitoring_result_t result;
 
@@ -74,6 +77,7 @@ static void update_display(const sensor_t sensors[2]) {
 }
 
 static void print_result(void) {
+    printf("# SESSION id=%016llx module=MPU\n", (unsigned long long)result.session_id);
     printf("# RESULTADO motivo=%u duracao_ms=%lu MPU1_validas=%lu MPU1_erros=%lu "
            "MPU2_validas=%lu MPU2_erros=%lu\n", (unsigned int)result.reason,
            (unsigned long)result.duration_ms, (unsigned long)result.valid[0],
@@ -110,6 +114,8 @@ void monitoring_serial_update(void) {
 void monitoring_start(uint32_t now_ms) {
     result = (monitoring_result_t){0};
     result_available = false;
+    result.session_id = session_current()->id;
+    paused = false; paused_ms = 0;
     started_ms = next_sample_ms = now_ms;
     active = true;
     for (int i = 0; i < 2; ++i) sensors[i].valid = false;
@@ -117,8 +123,8 @@ void monitoring_start(uint32_t now_ms) {
 }
 
 bool monitoring_update(uint32_t now_ms) {
-    if (!active || (int32_t)(now_ms - next_sample_ms) < 0) return true;
-    next_sample_ms = now_ms + MONITORING_SAMPLE_MS;
+    if (!active || paused || (int32_t)(now_ms - next_sample_ms) < 0) return true;
+    next_sample_ms = now_ms + session_current()->config.sample_ms;
     bool success = true;
     for (int i = 0; i < 2; ++i) {
         sensor_t *sensor = &sensors[i];
@@ -138,8 +144,9 @@ void monitoring_draw(void) {
 
 void monitoring_stop(uint32_t now_ms, monitoring_end_t reason) {
     if (!active) return;
+    if (paused) monitoring_resume(now_ms);
     active = false;
-    result.duration_ms = now_ms - started_ms;
+    result.duration_ms = now_ms - started_ms - paused_ms;
     result.reason = reason;
     result_available = true;
     if (stdio_usb_connected()) print_result();
@@ -147,4 +154,9 @@ void monitoring_stop(uint32_t now_ms, monitoring_end_t reason) {
 
 const monitoring_result_t *monitoring_result(void) {
     return &result;
+}
+
+void monitoring_pause(uint32_t now_ms) { if (active && !paused) { paused = true; paused_at_ms = now_ms; } }
+void monitoring_resume(uint32_t now_ms) {
+    if (active && paused) { paused_ms += now_ms - paused_at_ms; paused = false; next_sample_ms = now_ms; }
 }
