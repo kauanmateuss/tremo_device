@@ -16,16 +16,20 @@ suites = {
     "monitoring": ["tests/test_monitoring.c", "src/monitoring.c"],
     "mpu": ["tests/test_mpu.c", "src/mpu6050_i2c.c"],
     "evaluation": ["tests/test_evaluation.c", "src/evaluation.c"],
+    "communication": ["tests/test_communication.c", "src/communication.c"],
+    "telemetry": ["tests/test_telemetry.c"],
     "session": ["tests/test_session.c"],
     "matrix": ["tests/test_matrix.c", "src/matrix.c"],
 }
 with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
     for name, sources in suites.items():
-        sources = sources + ["src/session.c"]
+        sources = sources + ["src/session.c", "src/telemetry.c"]
+        if name == "flow": sources += ["src/communication.c"]
         executable = str(Path(directory) / name)
+        extra = ["-DTREMO_MQTT_ENABLED=1", "-I" + str(root / "tests/network_stubs")] if name == "communication" else []
         subprocess.run([
             "cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
-            "-I" + str(root / "tests/stubs"), "-I" + str(root / "include"),
+            *extra, "-I" + str(root / "tests/stubs"), "-I" + str(root / "include"),
             *[str(root / source) for source in sources], "-o", executable,
         ], check=True)
         result = subprocess.run([executable], capture_output=True, text=True)

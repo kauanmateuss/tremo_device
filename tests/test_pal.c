@@ -180,4 +180,5 @@ int main(void) {
         assert(pal_result()->rounds_started == 3 && pal_get_state() == PAL_RESULTS);
     }
     puts("PASS PAL: associacoes, niveis, treino, repeticoes, limite, omissoes e interrupcao");
+    return 0;
 }

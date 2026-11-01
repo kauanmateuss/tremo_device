@@ -1,0 +1,6 @@
+#define TREMO_WIFI_SSID "test-only"
+#define TREMO_WIFI_PASSWORD ""
+#define TREMO_MQTT_HOST "192.168.1.215"
+#define TREMO_MQTT_PORT 1883
+#define TREMO_MQTT_USER ""
+#define TREMO_MQTT_PASSWORD ""

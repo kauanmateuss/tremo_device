@@ -249,6 +249,6 @@ e [registradores MPU6050](https://invensense.tdk.com/wp-content/uploads/2015/02/
 
 Tasks 05, 10 e 12 têm implementação de firmware. Task 13 possui testes automatizados,
 [protocolo de bancada](docs/validacao-tecnica.md) e verificador de capturas; medições
-físicas, usabilidade e repetibilidade ainda pendentes. Task 11 segue para MQTT/Mosquitto
-e armazenamento SQLite, conforme [plano desktop](desktop/README.md). Não há conexão
-MQTT ou aplicação gráfica nesta versão. Usar branches `feature/...` para novas tasks.
+físicas, usabilidade e repetibilidade ainda pendentes. Task 11 agora inclui
+[publicação MQTT no firmware](docs/mqtt.md); recepção SQLite e interface desktop
+são etapas separadas. Usar branches `feature/...` para novas tasks.

@@ -4,6 +4,7 @@
 #include <limits.h>
 #include "monitoring.h"
 #include "session.h"
+#include "telemetry.h"
 #include "pico/stdlib.h"
 #include "display.h"
 #include "mpu6050_i2c.h"
@@ -127,6 +128,23 @@ bool monitoring_sensor_ready(unsigned int index) {
     return index < 2 && sensors[index].ready;
 }
 
+static void transmit_batch(void) {
+    monitoring_sample_t samples[2];
+    unsigned n = 0;
+    while (n < 2 && monitoring_pop(&samples[n])) ++n;
+    if (!n) return;
+    char rows[2][256] = {{0}};
+    for (unsigned i = 0; i < n; ++i) {
+        const monitoring_sample_t *s = &samples[i];
+        snprintf(rows[i], sizeof(rows[i]), "[%lu,%llu,%u,%u,%lu,%d,%d,%d,%d,%d,%d,%ld,%ld,%ld]",
+            (unsigned long)s->sequence, (unsigned long long)s->timestamp_us, s->sensor, s->valid,
+            (unsigned long)s->read_us, s->accel[0], s->accel[1], s->accel[2], s->gyro_raw[0], s->gyro_raw[1], s->gyro_raw[2],
+            (long)s->gyro[0], (long)s->gyro[1], (long)s->gyro[2]);
+    }
+    telemetry_emit(samples[0].session_id, samples[0].timestamp_us, "samples", false,
+        "{\"module\":\"mpu\",\"rows\":[%s%s%s]}", rows[0], n == 2 ? "," : "", n == 2 ? rows[1] : "");
+}
+
 void monitoring_serial_update(void) {
     bool connected = stdio_usb_connected();
     if (connected && !serial_connected) {
@@ -136,7 +154,8 @@ void monitoring_serial_update(void) {
     }
     serial_connected = connected;
     // Orçamento limitado; nenhuma formatação/USB dentro da leitura I2C.
-    if (connected) {
+    if (telemetry_enabled()) transmit_batch();
+    else if (connected) {
         monitoring_sample_t sample;
         for (unsigned i = 0; i < 2 && monitoring_pop(&sample); ++i) print_sample(&sample);
     }
@@ -200,6 +219,16 @@ void monitoring_stop(uint32_t now_ms, monitoring_end_t reason) {
     result.duration_ms = now_ms - started_ms - paused_ms;
     result.reason = reason;
     result_available = true;
+    if (telemetry_enabled()) {
+        while (queue_count) transmit_batch();
+        telemetry_emit(result.session_id, time_us_64(), "result", true,
+            "{\"module\":\"mpu\",\"reason\":%u,\"duration_ms\":%lu,\"sample_ms\":%u,\"calibrated\":%s,\"valid\":[%lu,%lu],\"errors\":[%lu,%lu],\"missed_slots\":%lu,\"buffer_drops\":%lu,\"max_lateness_ms\":%lu,\"max_read_us\":%lu,\"max_pair_skew_us\":%lu,\"gyro_bias\":[[%d,%d,%d],[%d,%d,%d]]}",
+            result.reason, (unsigned long)result.duration_ms, result.sample_ms, result.calibrated ? "true" : "false",
+            (unsigned long)result.valid[0], (unsigned long)result.valid[1], (unsigned long)result.errors[0], (unsigned long)result.errors[1],
+            (unsigned long)result.missed_slots, (unsigned long)result.buffer_drops, (unsigned long)result.max_lateness_ms,
+            (unsigned long)result.max_read_us, (unsigned long)result.max_pair_skew_us,
+            result.gyro_bias[0][0], result.gyro_bias[0][1], result.gyro_bias[0][2], result.gyro_bias[1][0], result.gyro_bias[1][1], result.gyro_bias[1][2]);
+    }
     if (stdio_usb_connected()) print_result();
 }
 
