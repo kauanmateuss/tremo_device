@@ -9,7 +9,10 @@ com protocolos experimentais, treinamento e registros em RAM.
 ## Organização
 
 - `main.c`: inicialização da aplicação e loop principal.
-- `app.h` / `app.c`: FSM, telas, menu e controle das sessões.
+- `app.h` / `app.c`: FSM, telas e menu.
+- `session.h` / `session.c`: ID, configuração, duração ativa e pausas.
+- `assessment.h` / `assessment.c`: encaminhamento dos quatro testes e pausa segura.
+- `evaluation.h` / `evaluation.c`: sequência e resumo da bateria/avaliação completa.
 - `controls.h` / `controls.c`: dois eixos do joystick, botões A/B, debounce e eventos.
 - `mot.h` / `mot.c`: treinamento e avaliação MOT adaptada, resultados e exportação USB.
 - `rti.h` / `rti.c`: RTI por soltura do botão A, temporização e resultados.
@@ -241,3 +244,11 @@ Próximas tarefas simples:
 
 Referências técnicas: [Pico SDK](https://www.raspberrypi.com/documentation/pico-sdk/hardware.html)
 e [registradores MPU6050](https://invensense.tdk.com/wp-content/uploads/2015/02/MPU-6000-Register-Map.pdf).
+
+## Pendências e próxima etapa
+
+Tasks 05, 10 e 12 têm implementação de firmware. Task 13 possui testes automatizados,
+[protocolo de bancada](docs/validacao-tecnica.md) e verificador de capturas; medições
+físicas, usabilidade e repetibilidade ainda pendentes. Task 11 segue para MQTT/Mosquitto
+e armazenamento SQLite, conforme [plano desktop](desktop/README.md). Não há conexão
+MQTT ou aplicação gráfica nesta versão. Usar branches `feature/...` para novas tasks.
