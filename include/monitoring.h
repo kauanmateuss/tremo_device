@@ -50,6 +50,7 @@ void monitoring_resume(uint32_t now_ms);
 // Agenda uma leitura se estiver no prazo. false indica falha de aquisição.
 bool monitoring_update(uint32_t now_ms);
 void monitoring_draw(void);
+uint32_t monitoring_elapsed_ms(uint32_t now_ms);
 void monitoring_stop(uint32_t now_ms, monitoring_end_t reason);
 const monitoring_result_t *monitoring_result(void);
 // Mantém resultados em RAM e publica o último resumo ao reconectar o USB.

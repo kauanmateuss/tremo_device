@@ -3,6 +3,7 @@
 #include <string.h>
 #include "app.h"
 #include "session.h"
+#include "evaluation.h"
 #include "controls.h"
 #include "monitoring.h"
 #include "mpu6050_i2c.h"
@@ -36,6 +37,8 @@ uint32_t to_ms_since_boot(absolute_time_t t) { return (uint32_t)t; }
 void controls_init(void) {}
 control_event_t controls_poll(uint32_t now) { (void)now; control_event_t e = input; input = CONTROL_NONE; return e; }
 void display_init(void) {}
+void display_draw_text(const char *t, uint8_t x, uint8_t y) { (void)t; (void)x; (void)y; }
+void display_render(void) {}
 void display_show_lines(const char *text[], size_t n) {
     assert(n <= 8);
     memset(screen, 0, sizeof(screen));
@@ -82,6 +85,75 @@ static void start_from_menu(void) {
     unsigned int before = reads;
     step(CONTROL_NONE, 100); assert(reads == before);
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_ACQUIRING);
+}
+static void complete_mot(void) {
+    step(CONTROL_CONFIRM, 5);
+    const control_event_t moves[] = {CONTROL_LEFT, CONTROL_UP, CONTROL_RIGHT};
+    for (unsigned i = 0; i < 3; ++i) {
+        step(moves[i], 50); step(CONTROL_CONFIRM, 50); step(CONTROL_NONE, 1000);
+    }
+    assert(mot_get_state() == MOT_READY); step(CONTROL_CONFIRM, 5);
+    for (unsigned i = 0; i < 10; ++i) { step(CONTROL_NONE, 10000); step(CONTROL_NONE, 1000); }
+    assert(mot_get_state() == MOT_RESULTS);
+}
+static void complete_rti(void) {
+    step(CONTROL_CONFIRM, 5);
+    for (unsigned i = 0; i < 3; ++i) {
+        step(CONTROL_CONFIRM_RELEASE, 50); step(CONTROL_CONFIRM, 50);
+        step(CONTROL_NONE, 1000); step(CONTROL_CONFIRM_RELEASE, 250); step(CONTROL_NONE, 1000);
+    }
+    assert(rti_get_state() == RTI_READY); step(CONTROL_CONFIRM, 5);
+    for (unsigned i = 0; i < 10; ++i) {
+        step(CONTROL_CONFIRM_RELEASE, 50); step(CONTROL_CONFIRM, 50);
+        step(CONTROL_NONE, 1000); step(CONTROL_NONE, 2000); step(CONTROL_NONE, 1000);
+    }
+    assert(rti_get_state() == RTI_RESULTS);
+}
+static void complete_tremor(void) {
+    assert(app_get_state() == APP_INSTRUCTIONS);
+    step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 5); finish_calibration();
+    step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 0);
+    assert(app_get_state() == APP_ACQUIRING && monitoring_result()->valid[0] == 1);
+    step(CONTROL_NONE, 30000); assert(app_get_state() == APP_RESULTS);
+}
+static void exercise_evaluations(void) {
+    matrix_ok = true; healthy[0] = healthy[1] = true;
+    for (unsigned mode = 0; mode < 3; ++mode) {
+        app_init(); step(CONTROL_NONE, 2000);
+        session_config_t c = *session_config(); c.tests_mask = mode == 0 ? 3 : 2; c.tremor_first = mode == 0;
+        assert(session_configure(c));
+        step(CONTROL_DOWN, 5);
+        if (mode < 2) step(CONTROL_DOWN, 5);
+        step(CONTROL_CONFIRM, 5);
+        if (mode == 2) { step(CONTROL_UP, 5); step(CONTROL_CONFIRM, 5); }
+        assert(app_get_state() == APP_EVAL_SETUP);
+        uint64_t id = session_current()->id;
+        step(CONTROL_CONFIRM, 5);
+        unsigned count = evaluation_current()->count;
+        for (unsigned i = 0; i < count; ++i) {
+            unsigned module = evaluation_current()->steps[i].module;
+            unsigned before = reads;
+            if (module == 4) { complete_tremor(); assert(monitoring_result()->session_id == id); }
+            else if (module == 0) { complete_mot(); assert(mot_result()->session_id == id && reads == before); }
+            else { complete_rti(); assert(rti_result()->session_id == id && reads == before); }
+            assert(evaluation_current()->steps[i].status == STEP_COMPLETE);
+            step(CONTROL_CONFIRM, 5);
+        }
+        assert(app_get_state() == APP_EVAL_RESULTS && session_current()->state == SESSION_COMPLETE);
+        assert(!evaluation_current()->active && evaluation_current()->session_id == id);
+    }
+    // Falha de MPU antes da coleta interrompe a sequência; etapas futuras ficam pendentes.
+    app_init(); step(CONTROL_NONE, 2000); healthy[1] = false;
+    step(CONTROL_DOWN, 5); step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    step(CONTROL_CONFIRM, 5); step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 5);
+    assert(app_get_state() == APP_EVAL_RESULTS && session_current()->state == SESSION_ERROR);
+    assert(evaluation_current()->steps[0].status == STEP_ERROR && evaluation_current()->steps[1].status == STEP_PENDING);
+    healthy[1] = true; app_init(); step(CONTROL_NONE, 2000);
+    step(CONTROL_DOWN, 5); step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5); step(CONTROL_CONFIRM, 5);
+    complete_tremor(); step(CONTROL_CONFIRM, 5); // MOT.
+    step(CONTROL_BACK, 5);
+    assert(app_get_state() == APP_EVAL_RESULTS && session_current()->state == SESSION_INTERRUPTED);
+    assert(evaluation_current()->steps[0].status == STEP_COMPLETE && evaluation_current()->steps[1].status == STEP_INTERRUPTED);
 }
 int main(void) {
     app_init();
@@ -146,11 +218,11 @@ int main(void) {
     assert(reads == before_pal);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
-    assert(app_get_state() == APP_COG_UNAVAILABLE);
-    step(CONTROL_BACK, 5);
+    assert(app_get_state() == APP_EVAL_SETUP);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_EVAL_RESULTS);
     step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
     assert(strcmp(screen[0], "AVAL COMPLETA") == 0);
-    step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5); step(CONTROL_DOWN, 5);
+    step(CONTROL_BACK, 5); step(CONTROL_BACK, 5); step(CONTROL_DOWN, 5); step(CONTROL_DOWN, 5);
     start_from_menu();
     step(CONTROL_NONE, 0);
     assert(strcmp(screen[1], "X-2000 -250.1") == 0);
@@ -222,5 +294,6 @@ int main(void) {
     step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
     assert(app_get_state() == APP_PAL_ERROR);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
+    exercise_evaluations();
     puts("PASS FSM: menu, preparo, inicio, interrupcao, conclusao, falha e resultados");
 }

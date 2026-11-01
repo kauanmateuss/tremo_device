@@ -41,7 +41,7 @@ de usar: a configuração de software não altera o endereço do sensor.
 Ao ligar: inicializar periféricos → verificar sensores → boas-vindas → menu.
 O joystick seleciona, A confirma e B volta. As opções são tremores, cognitiva,
 completa e configurações/informações. Cognitiva abre o submenu MOT/RTI/PRM/PAL/bateria. MOT, RTI, PRM e PAL estão implementados;
-a bateria e a avaliação completa mostram EM BREVE.
+a bateria executa os testes selecionados e a avaliação completa inclui os tremores.
 
 Para monitorar: instruções → A preparar → calibração imóvel → sensores OK → A iniciar → aquisição.
 Uma sessão dura 30 ou 60 segundos, conforme a configuração. B solicita interrupção; A confirma e B continua.
@@ -144,7 +144,7 @@ limpa a sessão. Interrupção durante uma escolha registra `aborted`, sem conta
 A latência inclui decisão, movimento e debounce; precisa ser medida fisicamente.
 O banco e a apresentação são adaptações experimentais do conceito
 [PAL](https://cambridgecognition.com/paired-associates-learning-pal/), sem equivalência
-clínica ao CANTAB. Não há aquisição MPU simultânea, bateria automática ou pausa.
+clínica ao CANTAB. A coleta MPU é sequencial e a pausa aguarda a fronteira da rodada.
 
 Aceitação na placa: concluir os três níveis, provocar erro e conferir reapresentação
 das mesmas associações, atingir o limite de três rodadas, testar omissão e B durante
@@ -180,6 +180,23 @@ A fila de 256 leituras em RAM é consumida pela USB (até duas por ciclo). Sem c
 a fila cheia descarta novas leituras e incrementa o contador. A próxima sessão limpa
 a fila; não há garantia de retenção de uma sessão inteira. MQTT utilizará essa API
 em uma etapa posterior. A atualização síncrona do OLED pode causar atrasos mensuráveis.
+
+## Bateria e avaliação completa
+
+Em Configurações, selecione MOT/RTI/PRM/PAL (ao menos um) e MPU antes/depois.
+Cima/baixo escolhe a primeira linha da janela; A altera e B volta. A ordem cognitiva
+é MOT → RTI → PRM → PAL, omitindo os desmarcados. A bateria usa apenas os testes;
+a avaliação completa acrescenta tremores. Cada etapa mantém instruções e treino.
+Nos resultados da etapa, A avança e B encerra toda a sequência. Após a última etapa,
+A abre o resumo final. Limite de tentativas do PAL fica registrado como LIMITE;
+não é uma falha do hardware. Falha de sensor encerra a sequência com erro.
+
+Uma sessão compartilha ID e configuração entre todas as etapas. O resumo registra
+concluídas, interrompidas e pendentes. Os registros individuais permanecem nos seus
+módulos até uma nova execução do respectivo teste/reset; o resumo é substituído na
+próxima bateria. Não há execução simultânea dos MPUs e testes cognitivos.
+A duração configurada dos tremores começa no início da aquisição, mesmo quando
+outros testes já consumiram tempo na mesma sessão.
 
 ## Contratos das funções
 

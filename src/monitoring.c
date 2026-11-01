@@ -249,3 +249,7 @@ calibration_state_t monitoring_calibration_update(uint32_t now_ms) {
     return calibration;
 }
 void monitoring_calibration_cancel(void) { calibration = CAL_IDLE; calibrated = false; }
+
+uint32_t monitoring_elapsed_ms(uint32_t now_ms) {
+    return active ? (paused ? paused_at_ms : now_ms) - started_ms - paused_ms : result.duration_ms;
+}

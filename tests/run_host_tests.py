@@ -7,7 +7,7 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 suites = {
     "controls": ["tests/test_controls.c", "src/controls.c"],
-    "flow": ["tests/test_flow.c", "src/app.c", "src/assessment.c", "src/monitoring.c", "src/mot.c", "src/rti.c", "src/prm.c", "src/pal.c", "src/patterns.c"],
+    "flow": ["tests/test_flow.c", "src/app.c", "src/assessment.c", "src/evaluation.c", "src/monitoring.c", "src/mot.c", "src/rti.c", "src/prm.c", "src/pal.c", "src/patterns.c"],
     "mot": ["tests/test_mot.c", "src/mot.c"],
     "rti": ["tests/test_rti.c", "src/rti.c"],
     "rti_input": ["tests/test_rti_input.c", "src/rti.c", "src/controls.c"],
@@ -15,6 +15,7 @@ suites = {
     "pal": ["tests/test_pal.c", "src/pal.c", "src/patterns.c"],
     "monitoring": ["tests/test_monitoring.c", "src/monitoring.c"],
     "mpu": ["tests/test_mpu.c", "src/mpu6050_i2c.c"],
+    "evaluation": ["tests/test_evaluation.c", "src/evaluation.c"],
     "session": ["tests/test_session.c"],
     "matrix": ["tests/test_matrix.c", "src/matrix.c"],
 }
