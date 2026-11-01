@@ -40,6 +40,7 @@ add_executable(tremo_device main.c
             src/ssd1306_i2c.c
             src/display.c
             src/mpu6050_i2c.c
+            src/mot.c
             src/monitoring.c
             src/controls.c
             src/app.c)

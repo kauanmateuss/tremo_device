@@ -4,13 +4,14 @@
 #include "display.h"
 #include "matrix.h"
 #include "monitoring.h"
+#include "mot.h"
 #include "pico/stdlib.h"
 
 #define WELCOME_MS 2000
 #define DISPLAY_MS 200
 
 static app_state_t state;
-static unsigned int menu_option;
+static unsigned int menu_option, cognitive_option;
 static uint32_t welcome_started_ms, session_started_ms, last_display_ms;
 static bool matrix_ready;
 
@@ -24,6 +25,15 @@ static void show_menu(void) {
     const char *lines[] = {"MENU PRINCIPAL", "", rows[0], rows[1], rows[2], rows[3], "", "A OK  B VOLTAR"};
     for (unsigned int i = 0; i < 4; ++i)
         snprintf(rows[i], sizeof(rows[i]), "%c%s", menu_option == i ? '-' : ' ', options[i]);
+    display_show_lines(lines, 8);
+}
+
+static void show_cognitive_menu(void) {
+    const char *options[] = {"1 MOT", "2 RTI", "3 PRM", "4 PAL", "5 BATERIA"};
+    char rows[5][16];
+    const char *lines[] = {"AVAL COGNITIVA", "", rows[0], rows[1], rows[2], rows[3], rows[4], "A OK B VOLTAR"};
+    for (unsigned int i = 0; i < 5; ++i)
+        snprintf(rows[i], sizeof(rows[i]), "%c%s", cognitive_option == i ? '-' : ' ', options[i]);
     display_show_lines(lines, 8);
 }
 
@@ -93,6 +103,23 @@ static void enter_state(app_state_t next) {
         display_show_lines(lines, 5);
         break;
     }
+    case APP_COG_MENU:
+        show_cognitive_menu();
+        break;
+    case APP_MOT:
+        mot_begin();
+        break;
+    case APP_COG_UNAVAILABLE: {
+        const char *names[] = {"MOT", "RTI", "PRM", "PAL", "BATERIA"};
+        const char *lines[] = {names[cognitive_option], "EM BREVE", "", "B VOLTAR"};
+        display_show_lines(lines, 4);
+        break;
+    }
+    case APP_MOT_ERROR: {
+        const char *lines[] = {"MATRIZ FALHOU", "MOT BLOQUEADO", "", "B VOLTAR"};
+        display_show_lines(lines, 4);
+        break;
+    }
     case APP_INFO: {
         const char *lines[] = {"CONFIG E INFO", "TREMO V0.1", "SESSAO 30 S", "LEITURA 40 MS", "OLED 200 MS",
             matrix_ready ? "MATRIZ OK" : "MATRIZ FALHA", "CONFIG FIXA", "B MENU"};
@@ -114,14 +141,22 @@ void app_init(void) {
     matrix_ready = npInit(LED_PIN); // Inicializa apagada.
     monitoring_init();
     monitoring_prepare(); // Ausência de sensor não impede acessar o menu.
-    menu_option = 0;
+    menu_option = cognitive_option = 0;
     enter_state(APP_WELCOME);
 }
 
 void app_update(void) {
     uint32_t now = now_ms();
     control_event_t event = controls_poll(now);
+    // Captura o instante após aceitar o evento, antes de qualquer saída serial/OLED.
+    uint64_t event_us = time_us_64();
+    if (state == APP_MOT) {
+        if (mot_update(event, event_us)) enter_state(APP_COG_MENU);
+        mot_serial_update();
+        return; // Nenhuma aquisição MPU nem saída do monitoramento durante o MOT.
+    }
     monitoring_serial_update();
+    if (state != APP_ACQUIRING && state != APP_STOP_CONFIRM) mot_serial_update();
 
     switch (state) {
     case APP_WELCOME:
@@ -132,6 +167,7 @@ void app_update(void) {
         else if (event == CONTROL_DOWN) { menu_option = (menu_option + 1) % 4; show_menu(); }
         else if (event == CONTROL_CONFIRM) {
             enter_state(menu_option == 0 ? APP_INSTRUCTIONS :
+                        menu_option == 1 ? APP_COG_MENU :
                         menu_option == 3 ? APP_INFO : APP_UNAVAILABLE);
         }
         break;
@@ -176,6 +212,19 @@ void app_update(void) {
     case APP_RESULTS:
         if (event == CONTROL_BACK || event == CONTROL_CONFIRM) enter_state(APP_MENU);
         break;
+    case APP_COG_MENU:
+        if (event == CONTROL_BACK) enter_state(APP_MENU);
+        else if (event == CONTROL_UP) { cognitive_option = (cognitive_option + 4) % 5; show_cognitive_menu(); }
+        else if (event == CONTROL_DOWN) { cognitive_option = (cognitive_option + 1) % 5; show_cognitive_menu(); }
+        else if (event == CONTROL_CONFIRM)
+            enter_state(cognitive_option == 0 ? (matrix_ready ? APP_MOT : APP_MOT_ERROR) : APP_COG_UNAVAILABLE);
+        break;
+    case APP_COG_UNAVAILABLE:
+    case APP_MOT_ERROR:
+        if (event == CONTROL_BACK) enter_state(APP_COG_MENU);
+        break;
+    case APP_MOT:
+        break; // Tratado antes deste switch para isolar a execução cronometrada.
     case APP_UNAVAILABLE:
     case APP_INFO:
         if (event == CONTROL_BACK) enter_state(APP_MENU);
