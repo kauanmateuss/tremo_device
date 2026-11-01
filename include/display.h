@@ -13,6 +13,9 @@
 
 void display_init(void);
 
+// Mostra a tela de boas-vindas; o tempo de exibição fica a cargo da aplicação.
+void display_show_welcome(void);
+
 // Funcao para zerar a tela do display
 void clear_display(void);
 
