@@ -1,5 +1,6 @@
 #include "pal.h"
 #include "session.h"
+#include "telemetry.h"
 #include "patterns.h"
 #include "matrix.h"
 #include "display.h"
@@ -41,6 +42,21 @@ static void export_result(void) {
     printf("# PAL_END records=%u\n", result.record_count);
 }
 
+static void publish_result(void) {
+    if (!telemetry_enabled()) return;
+    for (unsigned i = 0; i < result.record_count; ++i) {
+        const pal_record_t *r = &result.records[i];
+        telemetry_emit(result.session_id, r->onset_us, "trial", true,
+            "{\"module\":\"pal\",\"index\":%u,\"training\":%s,\"outcome\":%u,\"onset_us\":%llu,\"elapsed_us\":%llu,\"pairs\":%u,\"round\":%u,\"trial\":%u,\"pattern\":%u,\"target_position\":%u,\"selected_position\":%u}",
+            i, r->training ? "true" : "false", r->outcome, (unsigned long long)r->onset_us, (unsigned long long)r->elapsed_us,
+            r->pairs, r->round, r->trial, r->pattern, r->target_position, r->selected_position);
+    }
+    telemetry_emit(result.session_id, time_us_64(), "result", true,
+        "{\"module\":\"pal\",\"interrupted\":%s,\"correct\":%u,\"wrong\":%u,\"omissions\":%u,\"valid_time_us\":%llu,\"record_count\":%u,\"levels_completed\":%u,\"rounds_started\":%u,\"limit_reached\":%s}",
+        result.interrupted ? "true" : "false", result.correct, result.wrong, result.omissions,
+        (unsigned long long)result.correct_time_us, result.record_count, result.levels_completed, result.rounds_started, result.limit_reached ? "true" : "false");
+}
+
 static void finish(bool interrupted) {
     result.interrupted = interrupted;
     saved = true;
@@ -55,6 +71,7 @@ static void finish(bool interrupted) {
     const char *lines[] = {"PAL ADAPTADO", interrupted ? "INTERROMPIDO" : result.limit_reached ? "LIMITE ATINGIDO" : "CONCLUIDO",
         levels, correct, wrong, omissions, rounds, "A OU B MENU"};
     display_show_lines(lines, 8);
+    publish_result();
     usb_connected = stdio_usb_connected();
     if (usb_connected) export_result();
 }

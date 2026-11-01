@@ -1,5 +1,6 @@
 #include "rti.h"
 #include "session.h"
+#include "telemetry.h"
 #include "display.h"
 #include "matrix.h"
 #include "pico/stdlib.h"
@@ -52,12 +53,32 @@ static void show_results(void) {
     display_show_lines(lines, 8);
 }
 
+static void publish_result(void) {
+    if (!telemetry_enabled()) return;
+    for (unsigned i = 0; i < result.record_count; ++i) {
+        const rti_record_t *r = &result.records[i];
+        char onset[24] = "null", release[24] = "null", latency[24] = "null";
+        if (r->stimulus_shown) snprintf(onset, sizeof(onset), "%llu", (unsigned long long)r->onset_us);
+        if (r->released) snprintf(release, sizeof(release), "%llu", (unsigned long long)r->release_us);
+        if (r->outcome == RTI_RESPONSE) snprintf(latency, sizeof(latency), "%llu", (unsigned long long)(r->release_us - r->onset_us));
+        telemetry_emit(result.session_id, r->ended_us, "trial", true,
+            "{\"module\":\"rti\",\"index\":%u,\"training\":%s,\"outcome\":%u,\"hold_us\":%llu,\"onset_us\":%s,\"release_us\":%s,\"ended_us\":%llu,\"reaction_us\":%s,\"planned_wait_us\":%lu}",
+            i, r->training ? "true" : "false", r->outcome, (unsigned long long)r->hold_us, onset, release,
+            (unsigned long long)r->ended_us, latency, (unsigned long)r->planned_wait_us);
+    }
+    telemetry_emit(result.session_id, time_us_64(), "result", true,
+        "{\"module\":\"rti\",\"interrupted\":%s,\"correct\":%u,\"wrong\":%u,\"omissions\":%u,\"valid_time_us\":%llu,\"record_count\":%u,\"levels_completed\":%u,\"rounds_started\":%u,\"limit_reached\":%s}",
+        result.interrupted ? "true" : "false", result.responses, result.anticipations, result.omissions,
+        (unsigned long long)result.response_time_us, result.record_count, 0u, 0u, "false");
+}
+
 static void finish(bool interrupted) {
     result.interrupted = interrupted;
     saved = true;
     state = RTI_RESULTS;
     clear_matrix();
     show_results();
+    publish_result();
     usb_connected = stdio_usb_connected();
     if (usb_connected) export_result();
 }

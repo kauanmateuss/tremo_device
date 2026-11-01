@@ -29,6 +29,7 @@ set(PICO_BOARD pico_w CACHE STRING "Board type")
 include(pico_sdk_import.cmake)
 
 project(tremo_device C CXX ASM)
+option(TREMO_MQTT "Habilita Wi-Fi/MQTT na Pico W" ON)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -48,6 +49,8 @@ add_executable(tremo_device main.c
             src/monitoring.c
             src/controls.c
             src/evaluation.c
+            src/telemetry.c
+            src/communication.c
             src/session.c
             src/assessment.c
             src/app.c)
@@ -86,3 +89,10 @@ target_link_libraries(tremo_device
 
 pico_add_extra_outputs(tremo_device)
 
+
+if(TREMO_MQTT)
+    target_compile_definitions(tremo_device PRIVATE TREMO_MQTT_ENABLED=1)
+    set(TREMO_NETWORK_CONFIG_DIR "${CMAKE_CURRENT_LIST_DIR}/config" CACHE PATH "Diretorio da configuracao local de rede")
+    target_include_directories(tremo_device PRIVATE ${TREMO_NETWORK_CONFIG_DIR} config)
+    target_link_libraries(tremo_device pico_cyw43_arch_lwip_poll pico_lwip_mqtt pico_unique_id)
+endif()

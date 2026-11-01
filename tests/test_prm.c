@@ -126,4 +126,5 @@ int main(void) {
         assert(prm_result()->record_count == PRM_MAX_RECORDS && prm_result()->correct == 6);
     }
     puts("PASS PRM: banco, memorizacao, alternativas, treino, prazos, resultados e interrupcao");
+    return 0;
 }

@@ -1,5 +1,6 @@
 #include "mot.h"
 #include "session.h"
+#include "telemetry.h"
 #include "display.h"
 #include "matrix.h"
 #include "pico/stdlib.h"
@@ -69,12 +70,28 @@ static void export_result(void) {
     printf("# MOT_END records=%u\n", result.record_count);
 }
 
+static void publish_result(void) {
+    if (!telemetry_enabled()) return;
+    for (unsigned i = 0; i < result.record_count; ++i) {
+        const mot_record_t *r = &result.records[i];
+        telemetry_emit(result.session_id, r->onset_us, "trial", true,
+            "{\"module\":\"mot\",\"index\":%u,\"training\":%s,\"outcome\":%u,\"onset_us\":%llu,\"elapsed_us\":%llu,\"target\":[%u,%u],\"selected\":[%u,%u]}",
+            i, r->training ? "true" : "false", r->outcome, (unsigned long long)r->onset_us, (unsigned long long)r->elapsed_us,
+            r->target_x, r->target_y, r->cursor_x, r->cursor_y);
+    }
+    telemetry_emit(result.session_id, time_us_64(), "result", true,
+        "{\"module\":\"mot\",\"interrupted\":%s,\"correct\":%u,\"wrong\":%u,\"omissions\":%u,\"valid_time_us\":%llu,\"record_count\":%u,\"levels_completed\":%u,\"rounds_started\":%u,\"limit_reached\":%s}",
+        result.interrupted ? "true" : "false", result.correct, result.wrong, result.omissions,
+        (unsigned long long)result.correct_time_us, result.record_count, 0u, 0u, "false");
+}
+
 static void finish(bool interrupted) {
     result.interrupted = interrupted;
     saved = true;
     state = MOT_RESULTS;
     clear_matrix();
     show_results();
+    publish_result();
     usb_connected = stdio_usb_connected();
     if (usb_connected) export_result();
 }

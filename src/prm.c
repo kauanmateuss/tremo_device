@@ -1,5 +1,6 @@
 #include "prm.h"
 #include "session.h"
+#include "telemetry.h"
 #include "patterns.h"
 #include "display.h"
 #include "pico/stdlib.h"
@@ -35,6 +36,21 @@ static void export_result(void) {
     printf("# PRM_END records=%u\n", result.record_count);
 }
 
+static void publish_result(void) {
+    if (!telemetry_enabled()) return;
+    for (unsigned i = 0; i < result.record_count; ++i) {
+        const prm_record_t *r = &result.records[i];
+        telemetry_emit(result.session_id, r->onset_us, "trial", true,
+            "{\"module\":\"prm\",\"index\":%u,\"training\":%s,\"outcome\":%u,\"onset_us\":%llu,\"elapsed_us\":%llu,\"target\":%u,\"novel\":%u,\"target_option\":%u,\"selected_option\":%u}",
+            i, r->training ? "true" : "false", r->outcome, (unsigned long long)r->onset_us, (unsigned long long)r->elapsed_us,
+            r->target, r->novel, r->target_option, r->selected_option);
+    }
+    telemetry_emit(result.session_id, time_us_64(), "result", true,
+        "{\"module\":\"prm\",\"interrupted\":%s,\"correct\":%u,\"wrong\":%u,\"omissions\":%u,\"valid_time_us\":%llu,\"record_count\":%u,\"levels_completed\":%u,\"rounds_started\":%u,\"limit_reached\":%s}",
+        result.interrupted ? "true" : "false", result.correct, result.wrong, result.omissions,
+        (unsigned long long)result.correct_time_us, result.record_count, 0u, 0u, "false");
+}
+
 static void finish(bool interrupted) {
     result.interrupted = interrupted;
     saved = true;
@@ -52,6 +68,7 @@ static void finish(bool interrupted) {
     const char *lines[] = {"PRM ADAPTADO", interrupted ? "INTERROMPIDO" : "CONCLUIDO",
         correct, wrong, omitted, accuracy, mean, "A OU B MENU"};
     display_show_lines(lines, 8);
+    publish_result();
     usb_connected = stdio_usb_connected();
     if (usb_connected) export_result();
 }

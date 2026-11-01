@@ -12,6 +12,7 @@
 #include "pico/rand.h"
 #include "session.h"
 #include "assessment.h"
+#include "communication.h"
 #include "evaluation.h"
 
 #define WELCOME_MS 2000
@@ -252,6 +253,7 @@ static void record_cognitive_step(void) {
 void app_init(void) {
     evaluation_cancel(false);
     stdio_init_all();
+    communication_init();
     session_init(get_rand_32());
     controls_init();
     display_init();
@@ -262,7 +264,7 @@ void app_init(void) {
     enter_state(APP_WELCOME);
 }
 
-void app_update(void) {
+static void app_step(void) {
     uint32_t now = now_ms();
     control_event_t event = controls_poll(now);
     // Captura o instante após aceitar o evento, antes de qualquer saída serial/OLED.
@@ -417,4 +419,10 @@ void app_update(void) {
 
 app_state_t app_get_state(void) {
     return state;
+}
+
+void app_update(void) {
+    app_step();
+    bool cognitive = state == APP_MOT || state == APP_RTI || state == APP_PRM || state == APP_PAL;
+    communication_update(!cognitive || assessment_finished());
 }

@@ -296,4 +296,5 @@ int main(void) {
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     exercise_evaluations();
     puts("PASS FSM: menu, preparo, inicio, interrupcao, conclusao, falha e resultados");
+    return 0;
 }
