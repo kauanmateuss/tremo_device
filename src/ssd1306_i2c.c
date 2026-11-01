@@ -3,10 +3,14 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include "pico/stdlib.h"
-#include "pico/binary_info.h"
+
 #include "hardware/i2c.h"
 #include "ssd1306_font.h"
 #include "ssd1306.h"
+
+// A 400 kHz, 1025 bytes levam cerca de 23 ms. O prazo inclui margem para IRQs.
+#define OLED_FRAME_TIMEOUT_US 40000
+#define OLED_COMMAND_TIMEOUT_US 2000
 
 // Calcular quanto do buffer será destinado à área de renderização
 void calculate_render_area_buffer_length(struct render_area *area) {
@@ -16,7 +20,7 @@ void calculate_render_area_buffer_length(struct render_area *area) {
 // Processo de escrita do i2c espera um byte de controle, seguido por dados
 void ssd1306_send_command(uint8_t command) {
     uint8_t buffer[2] = {0x80, command};
-    i2c_write_blocking(i2c1, ssd1306_i2c_address, buffer, 2, false);
+    i2c_write_timeout_us(i2c1, ssd1306_i2c_address, buffer, 2, false, OLED_COMMAND_TIMEOUT_US);
 }
 
 // Envia uma lista de comandos ao hardware
@@ -27,15 +31,20 @@ void ssd1306_send_command_list(uint8_t *ssd, int number) {
 }
 
 // Copia buffer de referência num novo buffer, a fim de adicionar o byte de controle desde o início
-void ssd1306_send_buffer(uint8_t ssd[], int buffer_length) {
-    if (!ssd || buffer_length <= 0 || buffer_length > (int)ssd1306_buffer_length) return;
+static bool send_buffer_until(const uint8_t ssd[], int buffer_length, absolute_time_t until) {
+    if (!ssd || buffer_length <= 0 || buffer_length > (int)ssd1306_buffer_length) return false;
     // Buffer fixo: evita malloc e não ocupa a pilha a cada atualização.
     static uint8_t temp_buffer[ssd1306_buffer_length + 1];
 
     temp_buffer[0] = 0x40;
     memcpy(temp_buffer + 1, ssd, buffer_length);
 
-    i2c_write_blocking(i2c1, ssd1306_i2c_address, temp_buffer, buffer_length + 1, false);
+    return i2c_write_blocking_until(i2c1, ssd1306_i2c_address, temp_buffer,
+                                    buffer_length + 1, false, until) == buffer_length + 1;
+}
+
+void ssd1306_send_buffer(uint8_t ssd[], int buffer_length) {
+    send_buffer_until(ssd, buffer_length, make_timeout_time_us(OLED_FRAME_TIMEOUT_US));
 }
 
 // Cria a lista de comandos (com base nos endereços definidos em ssd1306_i2c.h) para a inicialização do display
@@ -75,14 +84,17 @@ void ssd1306_scroll(bool set) {
 }
 
 // Atualiza uma parte do display com uma área de renderização
-void render_on_display(uint8_t *ssd, struct render_area *area) {
-    uint8_t commands[] = {
+bool render_on_display(uint8_t *ssd, struct render_area *area) {
+    // Um único prazo para o endereçamento e os pixels. 0x00 inicia uma lista de comandos.
+    absolute_time_t until = make_timeout_time_us(OLED_FRAME_TIMEOUT_US);
+    uint8_t commands[] = {0x00,
         ssd1306_set_column_address, area->start_column, area->end_column,
         ssd1306_set_page_address, area->start_page, area->end_page
     };
 
-    ssd1306_send_command_list(commands, count_of(commands));
-    ssd1306_send_buffer(ssd, area->buffer_length);
+    if (i2c_write_blocking_until(i2c1, ssd1306_i2c_address, commands, sizeof(commands),
+                                 false, until) != (int)sizeof(commands)) return false;
+    return send_buffer_until(ssd, area->buffer_length, until);
 }
 
 // Determina o pixel a ser aceso (no display) de acordo com a coordenada fornecida
@@ -180,8 +192,7 @@ void ssd1306_draw_string(uint8_t *ssd, int16_t x, int16_t y, const char *string)
 // Comando de configuração com base na estrutura ssd1306_t
 void ssd1306_command(ssd1306_t *ssd, uint8_t command) {
   ssd->port_buffer[1] = command;
-  i2c_write_blocking(
-	ssd->i2c_port, ssd->address, ssd->port_buffer, 2, false );
+  i2c_write_timeout_us(ssd->i2c_port, ssd->address, ssd->port_buffer, 2, false, OLED_COMMAND_TIMEOUT_US);
 }
 
 // Função de configuração do display para o caso do bitmap
@@ -240,8 +251,7 @@ void ssd1306_send_data(ssd1306_t *ssd) {
     ssd1306_command(ssd, ssd1306_set_page_address);
     ssd1306_command(ssd, 0);
     ssd1306_command(ssd, ssd->pages - 1);
-    i2c_write_blocking(
-    ssd->i2c_port, ssd->address, ssd->ram_buffer, ssd->bufsize, false );
+    i2c_write_timeout_us(ssd->i2c_port, ssd->address, ssd->ram_buffer, ssd->bufsize, false, OLED_FRAME_TIMEOUT_US);
 }
 
 // Desenha o bitmap (a ser fornecido em display_oled.c) no display

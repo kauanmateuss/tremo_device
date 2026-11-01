@@ -14,6 +14,7 @@ suites = {
     "prm": ["tests/test_prm.c", "src/prm.c", "src/patterns.c"],
     "pal": ["tests/test_pal.c", "src/pal.c", "src/patterns.c"],
     "monitoring": ["tests/test_monitoring.c", "src/monitoring.c"],
+    "oled": ["tests/test_oled.c", "src/ssd1306_i2c.c"],
     "mpu": ["tests/test_mpu.c", "src/mpu6050_i2c.c"],
     "evaluation": ["tests/test_evaluation.c", "src/evaluation.c"],
     "communication": ["tests/test_communication.c", "src/communication.c"],
