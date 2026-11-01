@@ -1,4 +1,5 @@
 #include "mpu6050_i2c.h"
+#include <stdio.h>
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
 
@@ -73,16 +74,49 @@ bool mpu6050_read_raw(int16_t accel[3], int16_t gyro[3], uint8_t address) {
     return true;
 }
 
+// Confere apenas os campos definidos no mapa de registradores do MPU-6050.
+static bool check_register(uint8_t address, uint8_t reg, uint8_t expected,
+                           uint8_t mask, char *error) {
+    uint8_t actual;
+    if (!read_registers(address, reg, &actual, 1)) {
+        snprintf(error, MPU6050_DIAG_SIZE, "falha leitura I2C reg=0x%02X", reg);
+        return false;
+    }
+    if ((actual & mask) != (expected & mask)) {
+        snprintf(error, MPU6050_DIAG_SIZE,
+                 "reg=0x%02X lido=0x%02X esperado=0x%02X mascara=0x%02X",
+                 reg, actual, expected, mask);
+        return false;
+    }
+    return true;
+}
+
 // DLPF habilitado: taxa = 1000 / (1 + SMPLRT_DIV). Faixas: 2g e 250 dps.
-bool mpu6050_configure(uint8_t address, uint16_t sample_ms) {
-    if (sample_ms != 20 && sample_ms != 40) return false;
-    uint8_t identity, actual[4];
-    uint8_t expected[] = {(uint8_t)(sample_ms - 1), sample_ms == 20 ? 4 : 5, 0, 0};
-    if (!read_registers(address, 0x75, &identity, 1) || identity != 0x68) return false;
-    if (!write_register(address, REG_PWR_MGMT_1, 0x01)) return false; // PLL X gyro.
-    for (unsigned i = 0; i < 4; ++i)
-        if (!write_register(address, 0x19 + i, expected[i])) return false;
-    if (!read_registers(address, 0x19, actual, sizeof(actual))) return false;
-    for (unsigned i = 0; i < 4; ++i) if (actual[i] != expected[i]) return false;
+bool mpu6050_configure(uint8_t address, uint16_t sample_ms, char error[MPU6050_DIAG_SIZE]) {
+    if (sample_ms != 20 && sample_ms != 40) {
+        snprintf(error, MPU6050_DIAG_SIZE, "periodo invalido: %u ms", sample_ms);
+        return false;
+    }
+    // WHO_AM_I[6:1] independe do pino AD0 (endereços 0x68 e 0x69).
+    if (!check_register(address, 0x75, 0x68, 0x7E, error)) return false;
+
+    if (!write_register(address, REG_PWR_MGMT_1, 0x01)) { // PLL do giroscópio X.
+        snprintf(error, MPU6050_DIAG_SIZE, "falha escrita I2C reg=0x6B");
+        return false;
+    }
+    const struct { uint8_t reg, value, mask; } settings[] = {
+        {0x19, (uint8_t)(sample_ms - 1), 0xFF}, // SMPLRT_DIV.
+        {0x1A, sample_ms == 20 ? 4 : 5, 0x3F}, // CONFIG: sincronismo e DLPF.
+        {0x1B, 0, 0xF8}, // GYRO_CONFIG: autoteste e faixa.
+        {REG_ACCEL_CONFIG, 0, 0xF8}
+    };
+    for (size_t i = 0; i < sizeof(settings) / sizeof(settings[0]); ++i) {
+        if (!write_register(address, settings[i].reg, settings[i].value)) {
+            snprintf(error, MPU6050_DIAG_SIZE, "falha escrita I2C reg=0x%02X", settings[i].reg);
+            return false;
+        }
+        if (!check_register(address, settings[i].reg, settings[i].value, settings[i].mask, error))
+            return false;
+    }
     return true;
 }

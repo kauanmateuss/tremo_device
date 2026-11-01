@@ -131,7 +131,7 @@ static void enter_state(app_state_t next) {
     }
     case APP_SENSOR_ERROR: {
         const char *lines[] = {"FALHA SENSOR", monitoring_sensor_ready(0) ? "MPU1 OK" : "MPU1 FALHA",
-            monitoring_sensor_ready(1) ? "MPU2 OK" : "MPU2 FALHA", "VERIFIQUE FIOS", "", "A TENTAR", "B VOLTAR"};
+            monitoring_sensor_ready(1) ? "MPU2 OK" : "MPU2 FALHA", "VER SERIAL USB", "", "A TENTAR", "B VOLTAR"};
         display_show_lines(lines, 7);
         break;
     }

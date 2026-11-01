@@ -6,6 +6,7 @@
 #include "pico/stdlib.h"
 static uint8_t regs[128], pointer;
 static bool fail;
+static uint8_t read_xor[128]; // Simula bits que diferem do valor escrito.
 i2c_inst_t instance, *i2c0 = &instance;
 unsigned i2c_init(i2c_inst_t *i, unsigned b) { (void)i; return b; }
 void gpio_set_function(uint pin, uint func) { (void)pin; (void)func; }
@@ -19,17 +20,31 @@ int i2c_write_timeout_us(i2c_inst_t *i, uint8_t a, const uint8_t *d, size_t n, b
 int i2c_read_timeout_us(i2c_inst_t *i, uint8_t a, uint8_t *d, size_t n, bool stop, unsigned timeout) {
     (void)i; (void)a; (void)stop; (void)timeout;
     if (fail) return -1;
-    memcpy(d, regs + pointer, n); return n;
+    memcpy(d, regs + pointer, n);
+    for (size_t j = 0; j < n; ++j) d[j] ^= read_xor[pointer + j];
+    return n;
 }
 int main(void) {
+    char error[MPU6050_DIAG_SIZE];
     regs[0x75] = 0x68;
-    assert(mpu6050_configure(0x69, 20));
+    assert(mpu6050_configure(0x69, 20, error));
     assert(regs[0x19] == 19 && regs[0x1a] == 4 && regs[0x1b] == 0 && regs[0x1c] == 0 && regs[0x6b] == 1);
-    assert(mpu6050_configure(0x68, 40)); assert(regs[0x19] == 39 && regs[0x1a] == 5);
-    assert(!mpu6050_configure(0x67, 20) && !mpu6050_configure(0x68, 0));
-    regs[0x75] = 0; assert(!mpu6050_configure(0x68, 20));
+    assert(mpu6050_configure(0x68, 40, error)); assert(regs[0x19] == 39 && regs[0x1a] == 5);
+    assert(!mpu6050_configure(0x67, 20, error) && !mpu6050_configure(0x68, 0, error));
+    read_xor[0x75] = 0x81; // Bits 7 e 0 não fazem parte da identidade.
+    read_xor[0x1A] = 0xC0;
+    read_xor[0x1B] = read_xor[0x1C] = 0x07;
+    assert(mpu6050_configure(0x68, 40, error) && mpu6050_configure(0x69, 20, error));
+    // Uma taxa, filtro ou escala incorreta ainda precisa impedir a aquisição.
+    for (unsigned reg = 0x19; reg <= 0x1C; ++reg) {
+        uint8_t bit = reg < 0x1B ? 1 : 8;
+        read_xor[reg] ^= bit;
+        assert(!mpu6050_configure(0x68, 40, error) && strstr(error, "lido="));
+        read_xor[reg] ^= bit;
+    }
+    regs[0x75] = 0; assert(!mpu6050_configure(0x68, 20, error));
     fail = true; int16_t a[3] = {123}, g[3] = {456};
     assert(!mpu6050_read_raw(a, g, 0x68) && a[0] == 123 && g[0] == 456);
-    assert(!mpu6050_configure(0x68, 20));
+    assert(!mpu6050_configure(0x68, 20, error));
     puts("PASS MPU: identidade, configuracao, taxas, faixas e falha I2C");
 }

@@ -170,6 +170,13 @@ O monitoramento pausa imediatamente e exclui esse período da duração ativa.
 O preparo verifica WHO_AM_I, configura e relê os registradores: ±2 g, ±250 graus/s,
 25 Hz com DLPF de 10 Hz ou 50 Hz com DLPF de 20 Hz. Referência: mapa de registradores
 [InvenSense](https://forum.arduino.cc/uploads/short-url/irIuOhPAskO6xY40ifvcP0HyV3H.pdf).
+Se as boas-vindas mostram `MPU1 FALHA` ou `MPU2 FALHA`, a calibração ainda
+não começou. Abra o monitor serial USB e procure as linhas `# MPU 0x68:`
+ou `# MPU 0x69:`. O firmware conserva o erro do último preparo por endereço:
+falha de comunicação no reset, escrita/leitura de registrador, valor inesperado
+(com valor lido, esperado e máscara) ou falha na primeira amostra. Em
+**Monitoramento de tremores**, use **A TENTAR** na tela de falha para repetir.
+
 A calibração usa 50 leituras por sensor após estabilização de 300 ms; exige apoio
 imóvel, verifica amplitude/variação e calcula apenas o bias do giroscópio. Não é
 calibração de escala em seis posições. A aceleração conserva a gravidade. B cancela;

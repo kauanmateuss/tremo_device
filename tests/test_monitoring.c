@@ -1,3 +1,4 @@
+#include "mpu6050_i2c.h"
 #include <assert.h>
 #include <stdio.h>
 #include "monitoring.h"
@@ -13,7 +14,7 @@ bool stdio_usb_connected(void) { return false; }
 void display_show_lines(const char *lines[], size_t n) { (void)lines; (void)n; }
 void mpu6050_setup_i2c(void) {}
 bool mpu6050_reset(uint8_t address) { (void)address; return !fail; }
-bool mpu6050_configure(uint8_t address, uint16_t ms) { (void)address; assert(ms == 20 || ms == 40); return !fail; }
+bool mpu6050_configure(uint8_t address, uint16_t ms, char error[MPU6050_DIAG_SIZE]) { (void)error; (void)address; assert(ms == 20 || ms == 40); return !fail; }
 bool mpu6050_read_raw(int16_t a[3], int16_t g[3], uint8_t addr) {
     ++reads; clock_us += 500;
     if (fail) return false;

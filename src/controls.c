@@ -77,12 +77,12 @@ control_event_t controls_poll(uint32_t now_ms) {
     adc_select_input(JOYSTICK_X_ADC);
     uint16_t x = adc_read();
     // Histerese e rearmamento somente com ambos os eixos no centro.
-    // Em diagonal, o eixo vertical tem prioridade. VERT/HORZ altos = cima/esquerda.
+    // Em diagonal, o eixo vertical tem prioridade. Na BitDogLab, X alto aponta para a direita.
     int direction = joystick_raw;
     if (y < JOYSTICK_LOW) direction = 1;
     else if (y > JOYSTICK_HIGH) direction = -1;
-    else if (x < JOYSTICK_LOW) direction = 2;
-    else if (x > JOYSTICK_HIGH) direction = -2;
+    else if (x < JOYSTICK_LOW) direction = -2;
+    else if (x > JOYSTICK_HIGH) direction = 2;
     else if (y >= JOYSTICK_CENTER_LOW && y <= JOYSTICK_CENTER_HIGH &&
              x >= JOYSTICK_CENTER_LOW && x <= JOYSTICK_CENTER_HIGH) direction = 0;
     if (direction != joystick_raw) {
