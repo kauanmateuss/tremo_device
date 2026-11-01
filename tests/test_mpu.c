@@ -42,6 +42,28 @@ int main(void) {
         assert(!mpu6050_configure(0x68, 40, error) && strstr(error, "lido="));
         read_xor[reg] ^= bit;
     }
+    memset(read_xor, 0, sizeof(read_xor));
+    // Reproduz o log da placa: os dois endereços retornam a identidade 0x70.
+    regs[0x75] = 0x70;
+    for (uint8_t addr = 0x68; addr <= 0x69; ++addr) {
+        for (unsigned ms = 20; ms <= 40; ms += 20) {
+            uint8_t filter = ms == 20 ? 4 : 5;
+            regs[0x1D] = 0x08; // Começa com o filtro do acelerômetro desabilitado.
+            assert(mpu6050_configure(addr, ms, error));
+            assert(regs[0x19] == ms - 1 && regs[0x1A] == filter);
+            assert(regs[0x1B] == 0 && regs[0x1C] == 0 && regs[0x1D] == filter);
+        }
+    }
+    read_xor[0x1B] = 1; // Bypass do filtro do giroscópio não pode passar na releitura.
+    assert(!mpu6050_configure(0x68, 40, error) && strstr(error, "reg=0x1B"));
+    read_xor[0x1B] = 0;
+    read_xor[0x1D] = 8;
+    assert(!mpu6050_configure(0x69, 20, error) && strstr(error, "reg=0x1D"));
+    regs[0x75] = 0x68;
+    regs[0x1D] = 0xAB; // No 6050 este registrador não configura o filtro.
+    assert(mpu6050_configure(0x69, 20, error) && regs[0x1D] == 0xAB);
+    regs[0x75] = 0x71; // Não confundir um modelo vizinho com o MPU-6500.
+    assert(!mpu6050_configure(0x68, 20, error) && strstr(error, "lido=0x71"));
     regs[0x75] = 0; assert(!mpu6050_configure(0x68, 20, error));
     fail = true; int16_t a[3] = {123}, g[3] = {456};
     assert(!mpu6050_read_raw(a, g, 0x68) && a[0] == 123 && g[0] == 456);
