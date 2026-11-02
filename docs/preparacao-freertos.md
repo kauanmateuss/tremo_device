@@ -1,9 +1,11 @@
 # Task 01 — Referência para a migração ao FreeRTOS
 
-O ponto de partida é o commit `64c59b423935dc660c700d99dc2c3236c623ca23` de
-`develop`. O Git permite recuperar o código dessa versão. O UF2 permite voltar
-ao firmware correspondente diretamente na placa. Foi compilado com a configuração
-de rede local e deve ficar fora do Git, pois pode conter credenciais.
+A referência é a primeira versão funcional integrada à `main`, commit
+`47254ea2e2645555bbbb5622de157267729a3ca4` (PR #19). Seu conteúdo coincide com
+`develop` em `46066ac3` e inclui as correções do temporizador do lwIP para MQTT
+e do zoom e arrasto no dashboard. Mesmo que a branch avance, esse hash permite
+recuperar a versão de referência e recompilar o firmware com a configuração de
+rede local. O UF2 pode conter credenciais e deve ficar fora do Git.
 
 ## Como o firmware funciona hoje
 
@@ -43,25 +45,23 @@ use `config/network_config.example.h` como modelo para o arquivo local.
 
 ```sh
 export PATH="$HOME/.pico-sdk/cmake/v4.3.4/bin:$HOME/.pico-sdk/ninja/v1.13.2:$PATH"
-cmake -S . -B build-baseline -G Ninja -DPICO_BOARD=pico_w -DTREMO_MQTT=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build-baseline -j 4
+cmake -S . -B build -G Ninja -DPICO_BOARD=pico_w -DTREMO_MQTT=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j 4
 python3 tests/run_host_tests.py
 python3 tests/test_capture_validator.py
 ```
 
 Critérios verificados no PC: compilação concluída, UF2 gerado, 15 suítes C
-aprovadas e verificador de captura aprovado com dados de teste. A cópia de
-retorno fica em `build-backup/64c59b42/tremo_device.uf2`, separada da saída de
-compilação. SHA-256 da cópia desta máquina:
-`71833a502e189a3263528bf92b4d0faaec4eb599fa8f244ca466442c6e58ac05`.
+aprovadas e verificador de captura aprovado com dados de teste.
 
-```sh
-(cd build-backup/64c59b42 && sha256sum -c SHA256SUMS)
-```
+O binário para gravar é `build/tremo_device.uf2`. Essa pasta é reutilizada nas
+compilações seguintes. Para reproduzir a versão funcional após avançar na
+migração, com o trabalho salvo, use `git switch --detach 47254ea2`, repita os
+comandos acima e volte à branch anterior com `git switch -`.
 
-## Ensaio de referência na BitDogLab — pendente
+## Ensaio comparativo na BitDogLab
 
-1. Conecte a Pico W por USB segurando BOOTSEL. Copie o UF2 de retorno para
+1. Conecte a Pico W por USB segurando BOOTSEL. Copie o UF2 gerado para
    o volume RPI-RP2. Após reiniciar, abra a serial USB e salve o log.
 2. Faça uma sessão de tremores de 30 s a 25 Hz sem pausa, com os dois MPUs
    calibrados. Para verificar também o desktop, inicie o Mosquitto e o receptor
@@ -77,6 +77,6 @@ compilação. SHA-256 da cópia desta máquina:
 python3 tools/validate_capture.py captura.csv --period-ms 40 --max-jitter-us 10000
 ```
 
-A [matriz de bancada](validacao-tecnica.md) detalha esses critérios. Para as
-próximas tasks, use esta branch e este commit de preparação como base de trabalho,
-preserve o UF2 de retorno e repita o mesmo ensaio para comparar resultados.
+A [matriz de bancada](validacao-tecnica.md) detalha esses critérios. Repita o
+mesmo ensaio após a integração do FreeRTOS e compare as capturas. A preparação
+da migração parte da versão funcional acima.
