@@ -10,6 +10,9 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 HAS_QT = importlib.util.find_spec("PySide6") and importlib.util.find_spec("pyqtgraph")
 if HAS_QT:
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
     from tremo_desktop.ui.window import DashboardWindow
     from tremo_desktop.ui.style import STYLE
@@ -70,6 +73,33 @@ class DashboardUITests(unittest.TestCase):
         window.search.setText("not-found")
         self.wait_for(lambda: window.snapshot["report"] is None)
         self.assertIs(window.stack.currentWidget(), window.empty_page)
+
+    def test_zoom_drag_refresh_and_reset(self):
+        window = self.window
+        window.tabs.setCurrentIndex(1)
+        self.application.processEvents()
+        for plot in window.tremor.plots * 3:
+            viewport = plot.viewport()
+            pos = viewport.rect().center()
+            vb = plot.getViewBox()
+            xmin, xmax = vb.viewRange()[0]
+            event = QWheelEvent(QPointF(pos), QPointF(viewport.mapToGlobal(pos)), QPoint(),
+                                QPoint(0, 120), Qt.NoButton, Qt.NoModifier,
+                                Qt.ScrollPhase.NoScrollPhase, False)
+            self.application.sendEvent(viewport, event)
+            self.application.processEvents()
+            lo, hi = vb.viewRange()[0]
+            self.assertLess(hi - lo, xmax - xmin)
+            QTest.mousePress(viewport, Qt.LeftButton, Qt.NoModifier, pos)
+            for delta in range(1, 10):
+                QTest.mouseMove(viewport, pos + QPoint(delta * 4, delta))
+                QTest.qWait(10)
+            QTest.mouseRelease(viewport, Qt.LeftButton, Qt.NoModifier, pos + QPoint(36, 9))
+            window.refresh(force=True)
+            self.wait_for(lambda: not window.busy)
+            window.tremor.reset_zoom()
+            self.application.processEvents()
+        self.assertTrue(window.isVisible())
 
     def test_empty_invalid_database_and_recovery(self):
         window = self.window

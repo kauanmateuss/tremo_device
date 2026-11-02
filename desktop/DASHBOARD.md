@@ -14,6 +14,17 @@ python -m pip install -e 'desktop[gui]'
 python -m tremo_desktop --db desktop/tremo.sqlite3 gui
 ```
 
+Se o ambiente já existia, feche a janela e repita a instalação acima antes de
+reabri-la. O projeto fixa a versão do PySide6 usada nos testes dos gráficos:
+com Python 3.11, PySide6 6.12.0 e PyQtGraph 0.14.0, zoom e arrasto repetidos
+puderam encerrar o processo com `none_dealloc` durante a pintura dos eixos.
+Essa atualização não altera o SQLite.
+
+Na migração de um ambiente do dashboard que usava PySide6 6.12.0, remova
+primeiro os pacotes separados daquela versão com
+`python -m pip uninstall -y PySide6-WebEngine PySide6-Pdf`. Depois da
+instalação de `desktop[gui]`, confira as dependências com `python -m pip check`.
+
 Para explorar sem placa, broker ou dados reais:
 
 ```sh
