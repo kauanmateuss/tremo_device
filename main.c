@@ -1,18 +1,10 @@
-#include <stdio.h>
+#include "app.h"
 #include "pico/stdlib.h"
-#include "matrix.h"
-#include "display.h"
-#include "hardware/i2c.h"
-#include "mpu6050_i2c.h"
 
-
-
-int main()
-{
-    stdio_init_all();
-
+int main(void) {
+    app_init();
     while (true) {
-        printf("Hello, world!\n");
-        sleep_ms(1000);
+        app_update();
+        sleep_ms(5); // Pequeno intervalo de polling dos controles.
     }
 }

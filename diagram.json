@@ -136,6 +136,8 @@
     }
   ],
   "connections": [
+    [ "pico:3V3", "joystick1:VCC", "red", [] ],
+    [ "pico:GND.1", "joystick1:GND", "black", [] ],
     [ "pico:GP0", "mpu1:SDA", "green", [] ],
     [ "pico:GP1", "mpu1:SCL", "blue", [] ],
     [ "pico:3V3", "mpu1:VCC", "red", [] ],

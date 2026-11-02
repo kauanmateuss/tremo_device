@@ -29,6 +29,7 @@ set(PICO_BOARD pico_w CACHE STRING "Board type")
 include(pico_sdk_import.cmake)
 
 project(tremo_device C CXX ASM)
+option(TREMO_MQTT "Habilita Wi-Fi/MQTT na Pico W" ON)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -39,7 +40,20 @@ add_executable(tremo_device main.c
             src/matrix.c
             src/ssd1306_i2c.c
             src/display.c
-            src/mpu6050_i2c.c)
+            src/mpu6050_i2c.c
+            src/patterns.c
+            src/pal.c
+            src/prm.c
+            src/rti.c
+            src/mot.c
+            src/monitoring.c
+            src/controls.c
+            src/evaluation.c
+            src/telemetry.c
+            src/communication.c
+            src/session.c
+            src/assessment.c
+            src/app.c)
 
 pico_set_program_name(tremo_device "tremo_device")
 pico_set_program_version(tremo_device "0.1")
@@ -48,12 +62,16 @@ pico_set_program_version(tremo_device "0.1")
 pico_generate_pio_header(tremo_device ${CMAKE_CURRENT_LIST_DIR}/ws2818b.pio)
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(tremo_device 1)
+# GPIOs 0 e 1 estão reservados para o I2C0 dos MPUs.
+pico_enable_stdio_uart(tremo_device 0)
 pico_enable_stdio_usb(tremo_device 1)
+# Limita a espera por um monitor USB lento durante a navegação.
+target_compile_definitions(tremo_device PRIVATE PICO_STDIO_USB_STDOUT_TIMEOUT_US=1000)
 
 # Add the standard library to the build
 target_link_libraries(tremo_device
-        pico_stdlib)
+        pico_stdlib
+        pico_rand)
 
 # Add the standard include files to the build
 target_include_directories(tremo_device PRIVATE
@@ -65,8 +83,16 @@ target_include_directories(tremo_device PRIVATE
 target_link_libraries(tremo_device 
         hardware_pio
         hardware_i2c
+        hardware_adc
         hardware_clocks
         )
 
 pico_add_extra_outputs(tremo_device)
 
+
+if(TREMO_MQTT)
+    target_compile_definitions(tremo_device PRIVATE TREMO_MQTT_ENABLED=1)
+    set(TREMO_NETWORK_CONFIG_DIR "${CMAKE_CURRENT_LIST_DIR}/config" CACHE PATH "Diretorio da configuracao local de rede")
+    target_include_directories(tremo_device PRIVATE ${TREMO_NETWORK_CONFIG_DIR} config)
+    target_link_libraries(tremo_device pico_cyw43_arch_lwip_poll pico_lwip_mqtt pico_unique_id)
+endif()

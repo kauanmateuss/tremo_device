@@ -1,2 +1,14 @@
 build
 !.vscode/*
+__pycache__/
+*.py[cod]
+.venv/
+
+config/network_config.h
+build-*/
+desktop/*.sqlite*
+desktop/.env
+
+# Ambiente e metadados do aplicativo Python
+desktop/.venv/
+*.egg-info/

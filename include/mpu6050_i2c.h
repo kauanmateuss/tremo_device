@@ -15,6 +15,9 @@
 // Inicialize o barramento uma vez antes de acessar os dois sensores.
 void mpu6050_setup_i2c(void);
 bool mpu6050_reset(uint8_t address);
+// Em falha, escreve o motivo no buffer fornecido pelo chamador.
+#define MPU6050_DIAG_SIZE 80
+bool mpu6050_configure(uint8_t address, uint16_t sample_ms, char error[MPU6050_DIAG_SIZE]);
 // Retorna 0=±2g, 1=±4g, 2=±8g, 3=±16g ou MPU6050_RANGE_ERROR.
 uint8_t mpu6050_get_accel_range(uint8_t address);
 bool mpu6050_set_accel_range(uint8_t range, uint8_t address);

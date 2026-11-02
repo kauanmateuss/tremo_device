@@ -12,6 +12,12 @@
 // =============== CABECALHOS DAS FUNCOES ===============
 
 void display_init(void);
+// Uma única tela pode ser salva para o diálogo de pausa.
+void display_save_screen(void);
+void display_restore_screen(void);
+
+// Mostra a tela de boas-vindas; o tempo de exibição fica a cargo da aplicação.
+void display_show_welcome(void);
 
 // Funcao para zerar a tela do display
 void clear_display(void);
