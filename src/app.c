@@ -264,7 +264,6 @@ static void record_cognitive_step(void) {
 
 void app_init(void) {
     evaluation_cancel(false);
-    stdio_init_all();
     communication_init();
     session_init(get_rand_32());
     controls_init();
@@ -276,14 +275,11 @@ void app_init(void) {
     enter_state(APP_WELCOME);
 }
 
-static void app_step(void) {
+static void app_step(control_event_t event, control_button_state_t button, uint64_t event_us) {
     uint32_t now = now_ms();
-    control_event_t event = controls_poll(now);
-    // Captura o instante após aceitar o evento, antes de qualquer saída serial/OLED.
-    uint64_t event_us = time_us_64();
     if (state == APP_MOT || state == APP_RTI || state == APP_PRM || state == APP_PAL) {
-        if (evaluation_current()->active && assessment_finished()) { assessment_update(CONTROL_NONE, event_us); evaluation_continue(event); return; }
-        bool leave = assessment_update(event, event_us);
+        if (evaluation_current()->active && assessment_finished()) { assessment_update(CONTROL_NONE, button, event_us); evaluation_continue(event); return; }
+        bool leave = assessment_update(event, button, event_us);
         if (assessment_finished()) {
             if (evaluation_current()->active) record_cognitive_step();
             else session_finish(assessment_interrupted() ? SESSION_INTERRUPTED : SESSION_COMPLETE, time_us_64());
@@ -435,7 +431,12 @@ app_state_t app_get_state(void) {
 }
 
 void app_update(void) {
-    app_step();
+    control_event_t event = controls_poll(now_ms());
+    app_update_input(event, controls_confirm_state(), time_us_64());
+}
+
+void app_update_input(control_event_t event, control_button_state_t button, uint64_t event_us) {
+    app_step(event, button, event_us);
     bool cognitive = state == APP_MOT || state == APP_RTI || state == APP_PRM || state == APP_PAL;
     communication_mode_t mode = COMM_NORMAL;
     if (cognitive && !assessment_finished()) mode = COMM_SUSPENDED;

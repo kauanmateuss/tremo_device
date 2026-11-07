@@ -42,7 +42,7 @@ static bool pause_if_safe(void) {
     session_pause(time_us_64());
     display_show_lines(lines, 4); return true;
 }
-bool assessment_update(control_event_t event, uint64_t now_us) {
+bool assessment_update(control_event_t event, control_button_state_t button, uint64_t now_us) {
     if (session_current()->state == SESSION_PAUSED) {
         if (event != CONTROL_CONFIRM && event != CONTROL_BACK) return false;
         display_restore_screen();
@@ -57,7 +57,7 @@ bool assessment_update(control_event_t event, uint64_t now_us) {
     bool exit = false;
     switch (selected) {
     case 0: exit = mot_update(event, now_us); mot_serial_update(); break;
-    case 1: exit = rti_update(event, controls_confirm_state(), now_us); rti_serial_update(); break;
+    case 1: exit = rti_update(event, button, now_us); rti_serial_update(); break;
     case 2: exit = prm_update(event, now_us); prm_serial_update(); break;
     default: exit = pal_update(event, now_us); pal_serial_update(); break;
     }

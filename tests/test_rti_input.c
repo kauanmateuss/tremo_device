@@ -55,7 +55,11 @@ int main(void) {
     assert(!rti_result()->records[0].stimulus_shown);
     poll_step(RTI_INTERVAL_US); poll_step(5000);
     assert(rti_get_state() == RTI_WAIT_HOLD);
-    transition_a(false); poll_step(RTI_MIN_WAIT_US);
+    transition_a(false);
+    clock_us += RTI_MIN_WAIT_US;
+    assert(!rti_update(CONTROL_LEFT, controls_confirm_state(), clock_us));
+    assert(rti_get_state() == RTI_FOREPERIOD && !lit);
+    poll_step(0);
     assert(rti_get_state() == RTI_STIMULUS && lit);
     uint64_t onset = clock_us;
     a_high = true; poll_step(250000); // Primeira soltura, seguida de bounce.
@@ -72,6 +76,10 @@ int main(void) {
     onset = clock_us;
     a_high = true; poll_step(RTI_RESPONSE_LIMIT_US - 10000);
     poll_step(10000); // Prazo vencido, aguarda validação da borda prévia.
+    assert(rti_get_state() == RTI_STIMULUS);
+    // Um evento antigo da fila não deve encerrar a tentativa antes da soltura.
+    control_button_state_t queued = {.pressed = true, .settled = true};
+    assert(!rti_update(CONTROL_RIGHT, queued, clock_us + 20000));
     assert(rti_get_state() == RTI_STIMULUS);
     poll_step(20000);
     assert(rti_result()->records[2].outcome == RTI_RESPONSE);

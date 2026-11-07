@@ -23,4 +23,5 @@ void gpio_init(uint pin);
 void gpio_set_dir(uint pin, bool out);
 void gpio_pull_up(uint pin);
 bool gpio_get(uint pin);
+void panic(const char *format, ...);
 #endif

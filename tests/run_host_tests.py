@@ -22,12 +22,14 @@ suites = {
     "session": ["tests/test_session.c"],
     "matrix": ["tests/test_matrix.c", "src/matrix.c"],
 }
+suites["flow_input"] = suites["flow"]
 with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
     for name, sources in suites.items():
         sources = sources + ["src/session.c", "src/telemetry.c"]
-        if name == "flow": sources += ["src/communication.c"]
+        if name in ("flow", "flow_input"): sources += ["src/communication.c"]
         executable = str(Path(directory) / name)
         extra = ["-DTREMO_MQTT_ENABLED=1", "-I" + str(root / "tests/network_stubs")] if name == "communication" else []
+        if name == "flow_input": extra += ["-DTEST_TASK_INPUT=1"]
         subprocess.run([
             "cc", "-std=c11", "-Wall", "-Wextra", "-Werror",
             *extra, "-I" + str(root / "tests/stubs"), "-I" + str(root / "include"),
@@ -37,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
         if result.returncode:
             print(result.stderr, end="")
             result.check_returncode()
-        if name == "flow":
+        if name in ("flow", "flow_input"):
             assert "# MPU 0x69: falha I2C no reset" in result.stdout
             assert "# MPU 0x68:" not in result.stdout
             assert "# RESULTADO motivo=1" in result.stdout
