@@ -45,6 +45,7 @@ add_executable(tremo_device main.c
             src/display_task.c
             src/input_task.c
             src/session_task.c
+            src/mpu_task.c
             src/matrix.c
             src/ssd1306_i2c.c
             src/display.c

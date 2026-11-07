@@ -47,11 +47,15 @@ bool monitoring_sensor_ready(unsigned int index);
 void monitoring_start(uint32_t now_ms);
 void monitoring_pause(uint32_t now_ms);
 void monitoring_resume(uint32_t now_ms);
-// Agenda uma leitura se estiver no prazo. false indica falha de aquisição.
+// No firmware RTOS, consulta a saúde da captura feita pela TaskMPU.
+// Na execução síncrona de testes, agenda a leitura. false indica falha.
 bool monitoring_update(uint32_t now_ms);
+// Chamada exclusivamente pela TaskMPU para atender prazos de aquisição.
+void monitoring_worker_update(void);
 void monitoring_draw(void);
 uint32_t monitoring_elapsed_ms(uint32_t now_ms);
 void monitoring_stop(uint32_t now_ms, monitoring_end_t reason);
+// Snapshot para o consumidor TaskSession, válido até a próxima chamada.
 const monitoring_result_t *monitoring_result(void);
 // Mantém resultados em RAM e publica o último resumo ao reconectar o USB.
 void monitoring_serial_update(void);

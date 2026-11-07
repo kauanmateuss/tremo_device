@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "session_task.h"
 #include "app.h"
+#include "mpu_task.h"
 #include "input_task.h"
 #include "pico/stdlib.h"
 #include "FreeRTOS.h"
@@ -9,6 +10,7 @@
 static void task_session(void *parameter) {
     (void)parameter;
     app_init();
+    mpu_task_start();
     input_task_start();
     TickType_t last_status = xTaskGetTickCount();
     for (;;) {

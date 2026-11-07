@@ -8,6 +8,19 @@
 #include "pico/stdlib.h"
 #include "display.h"
 #include "mpu6050_i2c.h"
+#ifdef TREMO_FREERTOS_ENABLED
+#include "FreeRTOS.h"
+#include "semphr.h"
+static SemaphoreHandle_t state_mutex;
+static void lock_state(void) {
+    BaseType_t taken = xSemaphoreTake(state_mutex, portMAX_DELAY);
+    configASSERT(taken == pdTRUE);
+}
+static void unlock_state(void) { xSemaphoreGive(state_mutex); }
+#else
+static void lock_state(void) {}
+static void unlock_state(void) {}
+#endif
 
 // Após reset, o giroscópio usa a faixa de ±250 graus/s.
 #define GYRO_SENS_250DPS 131.0f
@@ -30,7 +43,8 @@ static sensor_t sensors[2] = {
 static uint32_t next_sample_ms, started_ms, last_progress_ms;
 static uint32_t paused_at_ms, paused_ms;
 static bool paused;
-static bool active, serial_connected, result_available;
+static bool active, serial_connected, result_available, result_pending;
+static uint32_t duration_limit_ms;
 static monitoring_result_t result;
 static monitoring_sample_t queue[MONITORING_BUFFER_SIZE];
 static unsigned queue_head, queue_count;
@@ -44,9 +58,16 @@ static bool calibrated;
 static uint16_t sample_ms;
 
 bool monitoring_pop(monitoring_sample_t *sample) {
-    if (!sample || !queue_count) return false;
-    *sample = queue[queue_head];
-    queue_head = (queue_head + 1) % MONITORING_BUFFER_SIZE; --queue_count; return true;
+    if (!sample) return false;
+    lock_state();
+    bool available = queue_count > 0;
+    if (available) {
+        *sample = queue[queue_head];
+        queue_head = (queue_head + 1) % MONITORING_BUFFER_SIZE;
+        --queue_count;
+    }
+    unlock_state();
+    return available;
 }
 static void enqueue(const monitoring_sample_t *sample) {
     if (queue_count == MONITORING_BUFFER_SIZE) { ++result.buffer_drops; return; }
@@ -108,38 +129,48 @@ static void update_display(const sensor_t sensors[2]) {
     display_show_lines(lines, 8);
 }
 
-static void print_result(void) {
-    printf("# SESSION id=%016llx module=MPU\n", (unsigned long long)result.session_id);
+static void print_result(const monitoring_result_t *value) {
+    printf("# SESSION id=%016llx module=MPU\n", (unsigned long long)value->session_id);
     printf("# RESULTADO motivo=%u duracao_ms=%lu MPU1_validas=%lu MPU1_erros=%lu "
-           "MPU2_validas=%lu MPU2_erros=%lu\n", (unsigned int)result.reason,
-           (unsigned long)result.duration_ms, (unsigned long)result.valid[0],
-           (unsigned long)result.errors[0], (unsigned long)result.valid[1],
-           (unsigned long)result.errors[1]);
+           "MPU2_validas=%lu MPU2_erros=%lu\n", (unsigned int)value->reason,
+           (unsigned long)value->duration_ms, (unsigned long)value->valid[0],
+           (unsigned long)value->errors[0], (unsigned long)value->valid[1],
+           (unsigned long)value->errors[1]);
     printf("# AQUISICAO period_ms=%u calibrated=%u missed_slots=%lu drops=%lu late_ms=%lu read_us=%lu skew_us=%lu\n",
-        result.sample_ms, result.calibrated, (unsigned long)result.missed_slots, (unsigned long)result.buffer_drops,
-        (unsigned long)result.max_lateness_ms, (unsigned long)result.max_read_us, (unsigned long)result.max_pair_skew_us);
+        value->sample_ms, value->calibrated, (unsigned long)value->missed_slots, (unsigned long)value->buffer_drops,
+        (unsigned long)value->max_lateness_ms, (unsigned long)value->max_read_us, (unsigned long)value->max_pair_skew_us);
 }
 
 void monitoring_init(void) {
+#ifdef TREMO_FREERTOS_ENABLED
+    if (!state_mutex) state_mutex = xSemaphoreCreateMutex();
+    configASSERT(state_mutex);
+#endif
     mpu6050_setup_i2c();
-    active = serial_connected = result_available = false;
+    active = serial_connected = result_available = result_pending = false;
     result = (monitoring_result_t){0};
     queue_head = queue_count = 0; calibrated = false; calibration = CAL_IDLE;
 }
 
 bool monitoring_prepare(void) {
+    lock_state();
+    if (active) { unlock_state(); return false; }
     sample_ms = session_config()->sample_ms;
     if (!sample_ms) sample_ms = MONITORING_SAMPLE_MS;
     calibrated = false;
     for (unsigned i = 0; i < 2; ++i) memset(sensors[i].bias, 0, sizeof(sensors[i].bias));
     bool first = setup_sensor(&sensors[0]);
     bool second = setup_sensor(&sensors[1]);
+    unlock_state();
     if (serial_connected) print_setup_errors();
     return first && second;
 }
 
 bool monitoring_sensor_ready(unsigned int index) {
-    return index < 2 && sensors[index].ready;
+    lock_state();
+    bool ready = index < 2 && sensors[index].ready;
+    unlock_state();
+    return ready;
 }
 
 static void transmit_batch(void) {
@@ -160,21 +191,25 @@ static void transmit_batch(void) {
 }
 
 void monitoring_serial_update(void) {
+    lock_state();
+    monitoring_result_t snapshot = result;
+    bool capturing = active, waiting = paused, available = result_available;
+    unlock_state();
     bool connected = stdio_usb_connected();
     if (connected && !serial_connected) {
         printf("# Bem-vindo ao Tremo!\n");
         print_setup_errors();
         printf("mpu,session_id,sequence,timestamp_us,sensor,valid,read_us,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n");
-        if (result_available && !active) print_result();
+        if (available && !capturing) print_result(&snapshot);
     }
     serial_connected = connected;
-    if (active && !paused && connected && telemetry_enabled()) {
+    if (capturing && !waiting && connected && telemetry_enabled()) {
         uint32_t now = to_ms_since_boot(get_absolute_time());
         if (now - last_progress_ms >= 1000) {
             last_progress_ms = now;
             printf("# COLETA ms=%lu MPU1=%lu MPU2=%lu fila_mqtt=%u descartes_tx=%lu\n",
-                   (unsigned long)monitoring_elapsed_ms(now), (unsigned long)result.valid[0],
-                   (unsigned long)result.valid[1], telemetry_pending(), (unsigned long)telemetry_dropped());
+                   (unsigned long)monitoring_elapsed_ms(now), (unsigned long)snapshot.valid[0],
+                   (unsigned long)snapshot.valid[1], telemetry_pending(), (unsigned long)telemetry_dropped());
         }
     }
     // Orçamento limitado; nenhuma formatação/USB dentro da leitura I2C.
@@ -186,6 +221,9 @@ void monitoring_serial_update(void) {
 }
 
 void monitoring_start(uint32_t now_ms) {
+    lock_state();
+    duration_limit_ms = session_current()->config.duration_ms;
+    result_pending = false;
     result = (monitoring_result_t){0};
     result_available = false;
     result.session_id = session_current()->id;
@@ -196,10 +234,11 @@ void monitoring_start(uint32_t now_ms) {
     last_progress_ms = started_ms = next_sample_ms = now_ms;
     active = true;
     for (int i = 0; i < 2; ++i) sensors[i].valid = false;
+    unlock_state();
     if (stdio_usb_connected()) printf("# INICIO SESSAO\n");
 }
 
-bool monitoring_update(uint32_t now_ms) {
+static bool acquire(uint32_t now_ms) {
     if (!active || paused || (int32_t)(now_ms - next_sample_ms) < 0) return true;
     uint32_t lateness = now_ms - next_sample_ms;
     if (lateness > result.max_lateness_ms) result.max_lateness_ms = lateness;
@@ -233,16 +272,56 @@ bool monitoring_update(uint32_t now_ms) {
 }
 
 void monitoring_draw(void) {
-    update_display(sensors);
+    sensor_t snapshot[2];
+    lock_state();
+    memcpy(snapshot, sensors, sizeof(snapshot));
+    unlock_state();
+    update_display(snapshot);
 }
 
-void monitoring_stop(uint32_t now_ms, monitoring_end_t reason) {
-    if (!active) return;
-    if (paused) monitoring_resume(now_ms);
+// Chamado com o mutex retido. Não faz I/O nem formatação.
+static void stop_capture(uint32_t now_ms, monitoring_end_t reason) {
+    if (paused) {
+        paused_ms += now_ms - paused_at_ms;
+        paused = false;
+    }
     active = false;
     result.duration_ms = now_ms - started_ms - paused_ms;
     result.reason = reason;
-    result_available = true;
+    result_available = result_pending = true;
+}
+
+void monitoring_worker_update(void) {
+    lock_state();
+    uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (active && !paused) {
+        if (now - started_ms - paused_ms >= duration_limit_ms)
+            stop_capture(now, MONITORING_COMPLETE);
+        else if (!acquire(now))
+            stop_capture(to_ms_since_boot(get_absolute_time()), MONITORING_SENSOR_ERROR);
+    }
+    unlock_state();
+}
+
+bool monitoring_update(uint32_t now_ms) {
+    lock_state();
+#ifdef TREMO_FREERTOS_ENABLED
+    (void)now_ms;
+    bool healthy = !result_available || result.reason != MONITORING_SENSOR_ERROR;
+#else
+    bool healthy = acquire(now_ms);
+#endif
+    unlock_state();
+    return healthy;
+}
+
+void monitoring_stop(uint32_t now_ms, monitoring_end_t reason) {
+    lock_state();
+    if (active) stop_capture(now_ms, reason);
+    bool publish = result_pending;
+    result_pending = false;
+    unlock_state();
+    if (!publish) return;
     if (telemetry_enabled()) {
         while (queue_count) transmit_batch();
         telemetry_emit(result.session_id, time_us_64(), "result", true,
@@ -253,19 +332,30 @@ void monitoring_stop(uint32_t now_ms, monitoring_end_t reason) {
             (unsigned long)result.max_read_us, (unsigned long)result.max_pair_skew_us,
             result.gyro_bias[0][0], result.gyro_bias[0][1], result.gyro_bias[0][2], result.gyro_bias[1][0], result.gyro_bias[1][1], result.gyro_bias[1][2]);
     }
-    if (stdio_usb_connected()) print_result();
+    if (stdio_usb_connected()) print_result(&result);
 }
 
 const monitoring_result_t *monitoring_result(void) {
-    return &result;
+    static monitoring_result_t snapshot;
+    lock_state();
+    snapshot = result;
+    unlock_state();
+    return &snapshot;
 }
 
-void monitoring_pause(uint32_t now_ms) { if (active && !paused) { paused = true; paused_at_ms = now_ms; } }
+void monitoring_pause(uint32_t now_ms) {
+    lock_state();
+    if (active && !paused) { paused = true; paused_at_ms = now_ms; }
+    unlock_state();
+}
 void monitoring_resume(uint32_t now_ms) {
+    lock_state();
     if (active && paused) { paused_ms += now_ms - paused_at_ms; paused = false; next_sample_ms = now_ms; }
+    unlock_state();
 }
 
 void monitoring_calibration_begin(uint32_t now_ms) {
+    lock_state();
     calibrated = false; calibration = CAL_RUNNING; calibration_count = 0;
     calibration_due_ms = now_ms + 300; // Estabilização do filtro após configurar.
     memset(gyro_sum, 0, sizeof(gyro_sum));
@@ -273,8 +363,9 @@ void monitoring_calibration_begin(uint32_t now_ms) {
         memset(sensors[i].bias, 0, sizeof(sensors[i].bias));
         for (unsigned a = 0; a < 6; ++a) { minimum[i][a] = INT16_MAX; maximum[i][a] = INT16_MIN; }
     }
+    unlock_state();
 }
-calibration_state_t monitoring_calibration_update(uint32_t now_ms) {
+static calibration_state_t calibrate(uint32_t now_ms) {
     if (calibration != CAL_RUNNING || (int32_t)(now_ms - calibration_due_ms) < 0) return calibration;
     calibration_due_ms = now_ms + sample_ms;
     for (unsigned i = 0; i < 2; ++i) {
@@ -301,8 +392,22 @@ calibration_state_t monitoring_calibration_update(uint32_t now_ms) {
     }
     return calibration;
 }
-void monitoring_calibration_cancel(void) { calibration = CAL_IDLE; calibrated = false; }
+calibration_state_t monitoring_calibration_update(uint32_t now_ms) {
+    lock_state();
+    calibration_state_t value = calibrate(now_ms);
+    unlock_state();
+    return value;
+}
+void monitoring_calibration_cancel(void) {
+    lock_state();
+    calibration = CAL_IDLE;
+    calibrated = false;
+    unlock_state();
+}
 
 uint32_t monitoring_elapsed_ms(uint32_t now_ms) {
-    return active ? (paused ? paused_at_ms : now_ms) - started_ms - paused_ms : result.duration_ms;
+    lock_state();
+    uint32_t elapsed = active ? (paused ? paused_at_ms : now_ms) - started_ms - paused_ms : result.duration_ms;
+    unlock_state();
+    return elapsed;
 }
