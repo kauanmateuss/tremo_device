@@ -55,3 +55,12 @@ input_sample_t input_task_next(void) {
     taskEXIT_CRITICAL();
     return sample;
 }
+
+input_sample_t input_task_wait(uint32_t timeout_ms) {
+    input_sample_t sample;
+    if (xQueueReceive(events, &sample, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
+        return sample;
+    }
+    // Reconfere a fila junto com o snapshot caso uma entrada chegue no timeout.
+    return input_task_next();
+}

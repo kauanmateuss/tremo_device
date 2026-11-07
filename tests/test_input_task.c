@@ -62,6 +62,16 @@ static void consumer(void *parameter) {
     assert(current.event == CONTROL_NONE && !current.button.settled);
     puts("PASS RTOS input: amostragem independente, FIFO, bordas e debounce pendente");
 
+    TickType_t before_wait = xTaskGetTickCount();
+    current = input_task_wait(100);
+    assert(current.event == CONTROL_CONFIRM && current.button.pressed);
+    assert(xTaskGetTickCount() - before_wait < 100);
+    before_wait = xTaskGetTickCount();
+    current = input_task_wait(10);
+    assert(current.event == CONTROL_NONE && current.button.settled);
+    assert(xTaskGetTickCount() - before_wait >= 10);
+    puts("PASS RTOS input: espera acorda por evento e por prazo");
+
     expect_overflow = true;
     // O consumidor deixa de drenar a fila. A falha deve ser explícita.
     for (unsigned i = 0; i < 40; ++i) {
