@@ -5,7 +5,8 @@
 #include <stddef.h>
 #include "session.h"
 #define TELEMETRY_CAPACITY 96
-#define TELEMETRY_PAYLOAD 768
+// Inclui o terminador NUL. Mantém margem para o envelope e duas linhas MPU.
+#define TELEMETRY_PAYLOAD 704
 // TaskSession produz, TaskMQTT consome. Só o PUBACK remove o primeiro.
 void telemetry_init(const char *device, bool enabled);
 bool telemetry_enabled(void);
