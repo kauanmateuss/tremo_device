@@ -39,3 +39,47 @@ python3 tools/validate_capture.py captura.csv --period-ms 40 --max-jitter-us 100
 
 A aprovação em bancada exige resultados medidos e logs. Os testes do PC não
 medem latência de I2C, rádio, USB ou emissão óptica da BitDogLab.
+
+## Task 14 — Instrumentação e critérios de ajuste
+
+A cada 5 s fora de uma sessão ativa, a USB informa:
+
+- `RTOS_MEM heap_free`: bytes livres no heap FreeRTOS de 40 KiB.
+- `heap_min`: menor quantidade livre desde o boot.
+- `RTOS_STACK free_min_bytes`: menor folga observada na pilha de cada tarefa.
+
+A varredura das pilhas ocorre fora de sessões ativas para reduzir interferência
+nas medições. Esses valores não representam toda a RAM da placa: buffers
+estáticos e o heap usado pelo SDK são separados. O mapa do linker e o tamanho
+do ELF complementam a inspeção.
+
+A configuração inicial mantém TaskMPU em prioridade 4, TaskInput em 3,
+TaskSession e TaskDisplay em 2, TaskMQTT em 1. Pilhas: MPU 3 KiB, Input 2 KiB,
+Session 8 KiB, Display 4 KiB e MQTT 6 KiB. O tick é de 1 ms e o kernel executa
+em um único núcleo.
+
+Após cada ensaio, volte ao menu e salve o diagnóstico. Como critério inicial,
+procure pelo menos 512 bytes de folga em cada pilha e 4 KiB de heap mínimo livre,
+sem hooks de falha. Se não houver essa margem, registre a tarefa/ensaio e ajuste
+a reserva antes de reduzir qualquer pilha. Avalie `late_ms`, `read_us`,
+`skew_us`, `missed_slots` e `buffer_drops` do resumo de aquisição e a
+distribuição dos intervalos do arquivo capturado.
+
+A instrumentação e os testes automatizados estão implementados. A validação
+final, a otimização baseada em medidas e a avaliação de SMP permanecem pendentes
+dos ensaios físicos. O projeto segue configurado para um núcleo até existirem
+medidas que justifiquem dividir a execução entre dois.
+
+## Resultado automatizado desta revisão
+
+- Firmware Pico W compilado com MQTT habilitado e desabilitado.
+- 16 suítes de firmware no host aprovadas.
+- Cinco suítes POSIX aprovadas, incluindo as cinco tarefas juntas.
+- Validador de captura aprovado com dados de teste.
+- Desktop: 18 testes aprovados e um teste de broker real ignorado.
+- ELF com MQTT: `size` reportou 399140 bytes em text e 188352 bytes em bss.
+  A seção bss inclui o heap reservado do FreeRTOS e os buffers estáticos.
+
+Esses resultados registram a revisão de software. Preencha o roteiro de bancada
+com o commit gravado, configuração, logs e medições da placa antes de declarar
+a migração validada fisicamente.
