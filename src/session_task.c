@@ -15,8 +15,7 @@ static void task_session(void *parameter) {
     TickType_t last_status = xTaskGetTickCount();
     for (;;) {
         input_sample_t input = input_task_wait(5);
-        // Avança os prazos no instante atual. O RTI usa a borda capturada em button.
-        app_update_input(input.event, input.button, time_us_64());
+        app_update_captured(input.event, input.button, input.timestamp_us, time_us_64());
         TickType_t now = xTaskGetTickCount();
         if (now - last_status >= pdMS_TO_TICKS(1000)) {
             last_status = now;

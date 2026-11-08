@@ -22,6 +22,7 @@ static app_state_t state;
 static unsigned int menu_option, cognitive_option, config_option;
 static uint32_t welcome_started_ms, last_display_ms;
 static bool matrix_ready;
+static bool preparing_mot, capturing_mot;
 static communication_status_t ready_network;
 
 static void draw_ready(void) {
@@ -32,7 +33,7 @@ static void draw_ready(void) {
         [COMM_ONLINE] = "MQTT CONECTADO"
     };
     ready_network = communication_status();
-    const char *lines[] = {"SENSORES OK", "PRONTO", labels[ready_network],
+    const char *lines[] = {preparing_mot ? "MOT + MPU" : "SENSORES OK", "PRONTO", labels[ready_network],
                            "", "A INICIAR", "B VOLTAR"};
     display_show_lines(lines, 6);
 }
@@ -73,15 +74,16 @@ static void show_results(void) {
 }
 
 static void show_config(void) {
-    char rows[7][24];
+    char rows[8][24];
     const session_config_t *c = session_config();
     snprintf(rows[0], sizeof(rows[0]), "TEMPO %lu S", (unsigned long)(c->duration_ms / 1000));
     snprintf(rows[1], sizeof(rows[1]), "TAXA %u HZ", 1000 / c->sample_ms);
     const char *names[] = {"MOT", "RTI", "PRM", "PAL"};
     for (unsigned i = 0; i < 4; ++i) snprintf(rows[i + 2], sizeof(rows[0]), "%s %s", names[i], c->tests_mask & (1u << i) ? "SIM" : "NAO");
     snprintf(rows[6], sizeof(rows[6]), "MPU %s", c->tremor_first ? "ANTES" : "DEPOIS");
+    snprintf(rows[7], sizeof(rows[7]), "MPU MOT %s", c->mot_mpu ? "SIM" : "NAO");
     // Janela de três opções mantém instruções visíveis no OLED.
-    const char *lines[] = {"CONFIGURACOES", rows[config_option], rows[(config_option + 1) % 7], rows[(config_option + 2) % 7], "ALTERA PRIMEIRA", "A ALTERAR", "B MENU", "CLIQUE PAUSA"};
+    const char *lines[] = {"CONFIGURACOES", rows[config_option], rows[(config_option + 1) % 8], rows[(config_option + 2) % 8], "ALTERA PRIMEIRA", "A ALTERAR", "B MENU", "CLIQUE PAUSA"};
     display_show_lines(lines, 8);
 }
 static void show_evaluation_results(void) {
@@ -170,6 +172,10 @@ static void enter_state(app_state_t next) {
     case APP_MOT:
         if (!evaluation_current()->active) session_begin(SESSION_MOT, time_us_64());
         assessment_begin(0);
+        if (session_current()->config.mot_mpu) {
+            monitoring_start_continuous(now_ms());
+            capturing_mot = true;
+        }
         break;
     case APP_RTI:
         if (!evaluation_current()->active) session_begin(SESSION_RTI, time_us_64());
@@ -226,14 +232,31 @@ static void finish_session(monitoring_end_t reason) {
 }
 
 static void evaluation_end(session_state_t reason) {
+    preparing_mot = false;
     if (reason != SESSION_COMPLETE) evaluation_cancel(reason == SESSION_ERROR);
     session_finish(reason, time_us_64());
     enter_state(APP_EVAL_RESULTS);
 }
+static void launch_mot(void) {
+    if (session_config()->mot_mpu) {
+        preparing_mot = true;
+        enter_state(APP_PREPARING);
+    } else enter_state(APP_MOT);
+}
+
+static void leave_preparation(void) {
+    if (preparing_mot) {
+        preparing_mot = false;
+        if (evaluation_current()->active) evaluation_end(SESSION_INTERRUPTED);
+        else enter_state(APP_COG_MENU);
+    } else enter_state(APP_INSTRUCTIONS);
+}
+
 static void launch_step(void) {
     evaluation_start_step();
     unsigned module = evaluation_current()->steps[evaluation_current()->index].module;
     if (module == EVALUATION_TREMOR) enter_state(APP_INSTRUCTIONS);
+    else if (module == 0) launch_mot();
     else {
         const app_state_t states[] = {APP_MOT, APP_RTI, APP_PRM, APP_PAL};
         enter_state(states[module]);
@@ -273,15 +296,46 @@ void app_init(void) {
     monitoring_init();
     monitoring_prepare(); // Ausência de sensor não impede acessar o menu.
     menu_option = cognitive_option = config_option = 0;
+    preparing_mot = capturing_mot = false;
     enter_state(APP_WELCOME);
 }
 
-static void app_step(control_event_t event, control_button_state_t button, uint64_t event_us) {
+static void report_mot_sensor_error(void) {
+    if (evaluation_current()->active) {
+        evaluation_record(STEP_ERROR, mot_result()->correct, mot_result()->wrong, mot_result()->omissions);
+        evaluation_end(SESSION_ERROR);
+    } else {
+        session_finish(SESSION_ERROR, time_us_64());
+        const char *lines[] = {"FALHA MPU", "MOT ENCERRADO", "", "VER SERIAL USB", "A OU B VOLTAR"};
+        display_show_lines(lines, 5);
+    }
+}
+
+static void app_step(control_event_t event, control_button_state_t button, uint64_t event_us, uint64_t processing_us) {
     uint32_t now = now_ms();
     if (state == APP_MOT || state == APP_RTI || state == APP_PRM || state == APP_PAL) {
-        if (evaluation_current()->active && assessment_finished()) { assessment_update(CONTROL_NONE, button, event_us); evaluation_continue(event); return; }
-        bool leave = assessment_update(event, button, event_us);
+        if (state == APP_MOT && session_current()->config.mot_mpu)
+            monitoring_serial_update();
+        if (capturing_mot) {
+            if (!monitoring_update(now_ms())) {
+                assessment_update(CONTROL_BACK, button, event_us, processing_us);
+                monitoring_stop(now_ms(), MONITORING_SENSOR_ERROR);
+                capturing_mot = false;
+                report_mot_sensor_error();
+                return;
+            }
+        }
+        if (evaluation_current()->active && assessment_finished()) { assessment_update(CONTROL_NONE, button, event_us, processing_us); evaluation_continue(event); return; }
+        bool leave = assessment_update(event, button, event_us, processing_us);
         if (assessment_finished()) {
+            if (capturing_mot) {
+                monitoring_stop(now_ms(), assessment_interrupted() ? MONITORING_INTERRUPTED : MONITORING_COMPLETE);
+                capturing_mot = false;
+                if (monitoring_result()->reason == MONITORING_SENSOR_ERROR) {
+                    report_mot_sensor_error();
+                    return;
+                }
+            }
             if (evaluation_current()->active) record_cognitive_step();
             else session_finish(assessment_interrupted() ? SESSION_INTERRUPTED : SESSION_COMPLETE, time_us_64());
         }
@@ -316,14 +370,14 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         else if (event == CONTROL_CONFIRM) enter_state(APP_PREPARING);
         break;
     case APP_PREPARING:
-        if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
+        if (event == CONTROL_BACK) leave_preparation();
         else if (monitoring_prepare()) {
             monitoring_calibration_begin(now_ms()); enter_state(APP_CALIBRATING);
         } else if (evaluation_current()->active) evaluation_end(SESSION_ERROR);
         else enter_state(APP_SENSOR_ERROR);
         break;
     case APP_CALIBRATING:
-        if (event == CONTROL_BACK) { monitoring_calibration_cancel(); enter_state(APP_INSTRUCTIONS); }
+        if (event == CONTROL_BACK) { monitoring_calibration_cancel(); leave_preparation(); }
         else {
             calibration_state_t c = monitoring_calibration_update(now);
             if (c == CAL_OK) enter_state(APP_READY);
@@ -333,19 +387,22 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         break;
     case APP_CAL_ERROR:
         if (event == CONTROL_CONFIRM) { monitoring_calibration_begin(now); enter_state(APP_CALIBRATING); }
-        else if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
+        else if (event == CONTROL_BACK) leave_preparation();
         break;
     case APP_READY:
         if (ready_network != communication_status()) draw_ready();
-        if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
-        else if (event == CONTROL_CONFIRM) {
+        if (event == CONTROL_BACK) leave_preparation();
+        else if (event == CONTROL_CONFIRM && preparing_mot) {
+            preparing_mot = false;
+            enter_state(APP_MOT);
+        } else if (event == CONTROL_CONFIRM) {
             if (!evaluation_current()->active) session_begin(SESSION_TREMOR, time_us_64());
             monitoring_start(now_ms());
             enter_state(APP_ACQUIRING);
         }
         break;
     case APP_SENSOR_ERROR:
-        if (event == CONTROL_BACK) enter_state(APP_INSTRUCTIONS);
+        if (event == CONTROL_BACK) leave_preparation();
         else if (event == CONTROL_CONFIRM) enter_state(APP_PREPARING);
         break;
     case APP_ACQUIRING:
@@ -391,7 +448,10 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         else if (event == CONTROL_UP) { cognitive_option = (cognitive_option + 4) % 5; show_cognitive_menu(); }
         else if (event == CONTROL_DOWN) { cognitive_option = (cognitive_option + 1) % 5; show_cognitive_menu(); }
         else if (event == CONTROL_CONFIRM) {
-            if (cognitive_option == 0) enter_state(matrix_ready ? APP_MOT : APP_MOT_ERROR);
+            if (cognitive_option == 0) {
+                if (matrix_ready) launch_mot();
+                else enter_state(APP_MOT_ERROR);
+            }
             else if (cognitive_option == 1) enter_state(matrix_ready ? APP_RTI : APP_RTI_ERROR);
             else if (cognitive_option == 2) enter_state(matrix_ready ? APP_PRM : APP_PRM_ERROR);
             else if (cognitive_option == 3) enter_state(matrix_ready ? APP_PAL : APP_PAL_ERROR);
@@ -411,13 +471,14 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
     case APP_PAL:
         break; // Tratado antes deste switch para isolar a execução cronometrada.
     case APP_INFO:
-        if (event == CONTROL_UP || event == CONTROL_DOWN) { config_option = (config_option + (event == CONTROL_DOWN ? 1 : 6)) % 7; show_config(); }
+        if (event == CONTROL_UP || event == CONTROL_DOWN) { config_option = (config_option + (event == CONTROL_DOWN ? 1 : 7)) % 8; show_config(); }
         else if (event == CONTROL_CONFIRM) {
             session_config_t c = *session_config();
             if (config_option == 0) c.duration_ms = c.duration_ms == 30000 ? 60000 : 30000;
             else if (config_option == 1) c.sample_ms = c.sample_ms == 40 ? 20 : 40;
             else if (config_option < 6) c.tests_mask ^= 1u << (config_option - 2);
-            else c.tremor_first = !c.tremor_first;
+            else if (config_option == 6) c.tremor_first = !c.tremor_first;
+            else c.mot_mpu = !c.mot_mpu;
             session_configure(c); show_config();
         } else if (event == CONTROL_BACK) enter_state(APP_MENU);
         break;
@@ -437,10 +498,15 @@ void app_update(void) {
 }
 
 void app_update_input(control_event_t event, control_button_state_t button, uint64_t event_us) {
-    app_step(event, button, event_us);
+    app_update_captured(event, button, event_us, event_us);
+}
+
+void app_update_captured(control_event_t event, control_button_state_t button,
+                         uint64_t event_us, uint64_t now_us) {
+    app_step(event, button, event_us, now_us);
     bool cognitive = state == APP_MOT || state == APP_RTI || state == APP_PRM || state == APP_PAL;
     communication_mode_t mode = COMM_NORMAL;
-    if (cognitive && !assessment_finished()) mode = COMM_SUSPENDED;
+    if (cognitive && !assessment_finished()) mode = capturing_mot ? COMM_STREAM_ONLY : COMM_SUSPENDED;
     else if (state == APP_CALIBRATING || state == APP_ACQUIRING || state == APP_STOP_CONFIRM)
         mode = COMM_STREAM_ONLY;
     communication_update(mode);

@@ -14,6 +14,8 @@ void app_init(void);
 void app_update(void);
 // Entrada capturada pela TaskInput. event_us é o instante de processamento.
 void app_update_input(control_event_t event, control_button_state_t button, uint64_t event_us);
+void app_update_captured(control_event_t event, control_button_state_t button,
+                         uint64_t event_us, uint64_t now_us);
 // Útil para depuração e testes das transições.
 app_state_t app_get_state(void);
 

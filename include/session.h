@@ -9,6 +9,7 @@ typedef struct {
     uint16_t sample_ms;
     uint8_t tests_mask; // Bits 0..3: MOT, RTI, PRM, PAL, nessa ordem.
     bool tremor_first;
+    bool mot_mpu; // Coleta simultânea ao MOT, após preparo e calibração.
 } session_config_t;
 typedef struct {
     uint64_t id, started_us, ended_us, paused_us, pause_started_us;

@@ -220,9 +220,9 @@ void monitoring_serial_update(void) {
     }
 }
 
-void monitoring_start(uint32_t now_ms) {
+static void start_capture(uint32_t now_ms, uint32_t duration_ms) {
     lock_state();
-    duration_limit_ms = session_current()->config.duration_ms;
+    duration_limit_ms = duration_ms;
     result_pending = false;
     result = (monitoring_result_t){0};
     result_available = false;
@@ -236,6 +236,14 @@ void monitoring_start(uint32_t now_ms) {
     for (int i = 0; i < 2; ++i) sensors[i].valid = false;
     unlock_state();
     if (stdio_usb_connected()) printf("# INICIO SESSAO\n");
+}
+
+void monitoring_start(uint32_t now_ms) {
+    start_capture(now_ms, session_current()->config.duration_ms);
+}
+
+void monitoring_start_continuous(uint32_t now_ms) {
+    start_capture(now_ms, 0);
 }
 
 static bool acquire(uint32_t now_ms) {
@@ -295,7 +303,7 @@ void monitoring_worker_update(void) {
     lock_state();
     uint32_t now = to_ms_since_boot(get_absolute_time());
     if (active && !paused) {
-        if (now - started_ms - paused_ms >= duration_limit_ms)
+        if (duration_limit_ms && now - started_ms - paused_ms >= duration_limit_ms)
             stop_capture(now, MONITORING_COMPLETE);
         else if (!acquire(now))
             stop_capture(to_ms_since_boot(get_absolute_time()), MONITORING_SENSOR_ERROR);

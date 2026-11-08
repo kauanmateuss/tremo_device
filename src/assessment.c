@@ -1,5 +1,6 @@
 #include "assessment.h"
 #include "session.h"
+#include "monitoring.h"
 #include "display.h"
 #include "mot.h"
 #include "rti.h"
@@ -40,13 +41,17 @@ static bool pause_if_safe(void) {
     display_save_screen();
     const char *lines[] = {"SESSAO PAUSADA", "", "A CONTINUAR", "B ENCERRAR"};
     session_pause(time_us_64());
+    if (selected == 0 && session_current()->config.mot_mpu)
+        monitoring_pause(to_ms_since_boot(get_absolute_time()));
     display_show_lines(lines, 4); return true;
 }
-bool assessment_update(control_event_t event, control_button_state_t button, uint64_t now_us) {
+bool assessment_update(control_event_t event, control_button_state_t button, uint64_t event_us, uint64_t now_us) {
     if (session_current()->state == SESSION_PAUSED) {
         if (event != CONTROL_CONFIRM && event != CONTROL_BACK) return false;
         display_restore_screen();
         uint64_t delta = session_resume(time_us_64());
+        if (selected == 0 && session_current()->config.mot_mpu)
+            monitoring_resume(to_ms_since_boot(get_absolute_time()));
         if (selected == 0) mot_resume_after_pause(delta);
         if (selected == 1) rti_resume_after_pause(delta);
         now_us = time_us_64();
@@ -56,7 +61,7 @@ bool assessment_update(control_event_t event, control_button_state_t button, uin
     if (event != CONTROL_BACK && pause_if_safe()) return false;
     bool exit = false;
     switch (selected) {
-    case 0: exit = mot_update(event, now_us); mot_serial_update(); break;
+    case 0: exit = mot_update_captured(event, event_us, now_us); mot_serial_update(); break;
     case 1: exit = rti_update(event, button, now_us); rti_serial_update(); break;
     case 2: exit = prm_update(event, now_us); prm_serial_update(); break;
     default: exit = pal_update(event, now_us); pal_serial_update(); break;

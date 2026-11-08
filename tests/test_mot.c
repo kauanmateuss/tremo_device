@@ -106,5 +106,16 @@ int main(void) {
     assert(strcmp(screen[5], "SEM DADOS") == 0);
     mot_begin(); step(CONTROL_BACK, 0);
     assert(mot_result()->record_count == 0 && mot_result()->interrupted);
+    // Uma confirmação enfileirada antes do prazo deve manter sua latência.
+    mot_begin(); step(CONTROL_CONFIRM, 0);
+    onset = clock_us;
+    assert(!mot_update_captured(CONTROL_LEFT, onset - 1, clock_us));
+    assert(cx == 2); // Movimento anterior ao alvo foi descartado.
+    step(CONTROL_LEFT, 100000);
+    uint64_t captured = clock_us + 100000;
+    clock_us = onset + MOT_TIMEOUT_US + 50000;
+    assert(!mot_update_captured(CONTROL_CONFIRM, captured, clock_us));
+    assert(mot_result()->records[0].outcome == MOT_CORRECT);
+    assert(mot_result()->records[0].elapsed_us == captured - onset);
     puts("PASS MOT: treino, inicio, tempo, limites, acuracia, omissao, interrupcao e exportacao");
 }
