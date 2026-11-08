@@ -13,5 +13,6 @@ typedef enum {
     COMM_WIFI_NO_IP, COMM_BROKER_WAIT, COMM_ONLINE
 } communication_status_t;
 communication_status_t communication_status(void);
+// Com RTOS, o serviço é automático na TaskMQTT. Sem RTOS, atende uma iteração.
 void communication_update(communication_mode_t mode);
 #endif
