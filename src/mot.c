@@ -28,13 +28,13 @@ static void clear_matrix(void) {
     npWrite();
 }
 
-static void draw_matrix(void) {
+static uint64_t draw_matrix(void) {
     unsigned int index = target_index();
     npClear();
     npSetPixel(targets[index][0], targets[index][1], 0, 20, 0);
     bool on_target = cursor_x == targets[index][0] && cursor_y == targets[index][1];
     npSetPixel(cursor_x, cursor_y, 0, on_target ? 20 : 0, 20);
-    npWrite();
+    return npWriteTimed();
 }
 
 static void show_results(void) {
@@ -103,9 +103,8 @@ static void start_trial(void) {
     const char *lines[] = {title, "ALVO VERDE", "CURSOR AZUL", "CIANO SOBREPOE", "MOVA JOYSTICK", "A SELECIONA", "B ENCERRA", "LIMITE 10 S"};
     display_show_lines(lines, 8); // Desenha OLED ANTES de apresentar o alvo.
     cursor_x = cursor_y = 2;
-    draw_matrix();
-    // Referência de software após o envio/latch dos LEDs; requer validação física.
-    onset_us = time_us_64();
+    // Timestamp após envio/latch, antes da tarefa de sessão voltar a executar.
+    onset_us = draw_matrix();
     state = MOT_STIMULUS;
 }
 

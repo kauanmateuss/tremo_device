@@ -8,7 +8,7 @@ static const uint16_t masks[PATTERN_COUNT] = {
     0x153, 0x165, 0x18b, 0x195, 0x1a3, 0x1c5, 0x13a, 0x0f1
 };
 
-void patterns_clear(void) { npClear(); npWrite(); }
+uint64_t patterns_clear(void) { npClear(); return npWriteTimed(); }
 
 void patterns_draw(uint8_t id) {
     npClear();
@@ -18,7 +18,7 @@ void patterns_draw(uint8_t id) {
     }
 }
 
-void patterns_show(uint8_t id) { patterns_draw(id); npWrite(); }
+uint64_t patterns_show(uint8_t id) { patterns_draw(id); return npWriteTimed(); }
 
 void patterns_shuffle(uint8_t *items, uint8_t count) {
     for (uint8_t i = count; i > 1; --i) {

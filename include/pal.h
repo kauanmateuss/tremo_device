@@ -38,6 +38,8 @@ typedef struct {
 // Posições 0/1 = superior esq/dir; 2/3 = inferior esq/dir. Treino fora das métricas.
 void pal_begin(void);
 bool pal_update(control_event_t event, uint64_t event_us);
+// Captura da entrada separada do relógio usado para avançar memorização/intervalos.
+bool pal_update_captured(control_event_t event, uint64_t event_us, uint64_t now_us);
 void pal_serial_update(void);
 pal_state_t pal_get_state(void);
 const pal_result_t *pal_result(void);

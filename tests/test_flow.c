@@ -168,9 +168,9 @@ static void exercise_mot_capture(void) {
     app_init(); step(CONTROL_NONE, 2000);
     step(CONTROL_UP, 5); step(CONTROL_CONFIRM, 5); // Configurações.
     step(CONTROL_UP, 5);
-    assert(strcmp(screen[1], "MPU MOT NAO") == 0);
+    assert(strcmp(screen[1], "MPU COG NAO") == 0);
     step(CONTROL_CONFIRM, 5);
-    assert(session_config()->mot_mpu && strcmp(screen[1], "MPU MOT SIM") == 0);
+    assert(session_config()->cognitive_mpu && strcmp(screen[1], "MPU COG SIM") == 0);
     step(CONTROL_BACK, 5);
     step(CONTROL_DOWN, 5); step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_PREPARING);
@@ -202,7 +202,7 @@ static void exercise_mot_capture(void) {
 
     // Também mantém o ID da bateria e marca erro na etapa MOT.
     app_init(); step(CONTROL_NONE, 2000);
-    session_config_t c = *session_config(); c.mot_mpu = true; c.tests_mask = 1;
+    session_config_t c = *session_config(); c.cognitive_mpu = true; c.tests_mask = 1;
     assert(session_configure(c));
     step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5); step(CONTROL_UP, 5);
     step(CONTROL_CONFIRM, 5); step(CONTROL_CONFIRM, 5);
@@ -213,6 +213,33 @@ static void exercise_mot_capture(void) {
     assert(app_get_state() == APP_EVAL_RESULTS && session_current()->state == SESSION_ERROR);
     assert(evaluation_current()->steps[0].status == STEP_ERROR);
     healthy[1] = true;
+}
+
+static void exercise_memory_capture(void) {
+    for (unsigned test = 1; test < 4; ++test) {
+        app_init(); step(CONTROL_NONE, 2000);
+        session_config_t c = *session_config(); c.cognitive_mpu = true;
+        assert(session_configure(c));
+        step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+        for (unsigned i = 0; i < test; ++i) step(CONTROL_DOWN, 5);
+        step(CONTROL_CONFIRM, 5);
+        assert(app_get_state() == APP_PREPARING);
+        step(CONTROL_NONE, 5); finish_calibration(); step(CONTROL_CONFIRM, 5);
+        unsigned before = reads;
+        step(CONTROL_NONE, 50);
+        assert(reads > before);
+        step(CONTROL_PAUSE, 5);
+        assert(session_current()->state == SESSION_PAUSED);
+        before = reads;
+        step(CONTROL_NONE, 5000); assert(reads == before);
+        step(CONTROL_CONFIRM, 5);
+        assert(session_current()->state == SESSION_RUNNING);
+        step(CONTROL_CONFIRM, 5); // Treino.
+        healthy[1] = false; step(CONTROL_NONE, 50);
+        assert(session_current()->state == SESSION_ERROR);
+        assert(monitoring_result()->reason == MONITORING_SENSOR_ERROR);
+        healthy[1] = true;
+    }
 }
 
 int main(void) {
@@ -358,6 +385,7 @@ int main(void) {
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     exercise_evaluations();
     exercise_mot_capture();
+    exercise_memory_capture();
     puts("PASS FSM: menu, preparo, inicio, interrupcao, conclusao, falha e resultados");
     return 0;
 }

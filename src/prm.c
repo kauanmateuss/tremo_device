@@ -78,8 +78,7 @@ static void show_encoding(void) {
     snprintf(progress, sizeof(progress), "PADRAO %u DE %u", encoding + 1, count);
     const char *lines[] = {training ? "TREINO PRM" : "PRM", "MEMORIZE", progress, "", "B ENCERRA"};
     display_show_lines(lines, 5);
-    patterns_show(deck[offset() + encoding]);
-    state_started_us = time_us_64();
+    state_started_us = patterns_show(deck[offset() + encoding]);
     state = PRM_ENCODING;
 }
 
@@ -92,19 +91,18 @@ static void start_block(void) {
     show_encoding();
 }
 
-static void draw_choice(void) {
+static uint64_t draw_choice(void) {
     const char *lines[] = {training ? "TREINO PRM" : "PRM", "QUAL VOCE VIU?",
         selected ? "OPCAO 2" : "OPCAO 1", "ESQ 1 DIR 2", visited == 3 ? "A CONFIRMA" : "VEJA AS 2",
         "LIMITE 15 S", "B ENCERRA"};
     display_show_lines(lines, 7);
-    patterns_show(selected == slots[trial] ? target() : novel());
+    return patterns_show(selected == slots[trial] ? target() : novel());
 }
 
 static void start_choice(void) {
     selected = 0;
     visited = 1;
-    draw_choice();
-    onset_us = time_us_64();
+    onset_us = draw_choice();
     state = PRM_CHOICE;
 }
 
@@ -143,9 +141,13 @@ void prm_begin(void) {
 }
 
 bool prm_update(control_event_t event, uint64_t event_us) {
+    return prm_update_captured(event, event_us, event_us);
+}
+
+bool prm_update_captured(control_event_t event, uint64_t event_us, uint64_t now_us) {
     if (state == PRM_RESULTS) return event == CONTROL_CONFIRM || event == CONTROL_BACK;
     if (event == CONTROL_BACK) {
-        if (state == PRM_CHOICE) record_choice(PRM_ABORTED, event_us);
+        if (state == PRM_CHOICE) record_choice(PRM_ABORTED, now_us);
         finish(true);
         return false;
     }
@@ -154,20 +156,22 @@ bool prm_update(control_event_t event, uint64_t event_us) {
         if (event == CONTROL_CONFIRM) start_block();
         break;
     case PRM_ENCODING:
-        if (event_us - state_started_us >= PRM_ENCODING_US) {
-            patterns_clear(); state_started_us = time_us_64(); state = PRM_GAP;
+        if (now_us - state_started_us >= PRM_ENCODING_US) {
+            state_started_us = patterns_clear(); state = PRM_GAP;
         }
         break;
     case PRM_GAP:
-        if (event_us - state_started_us >= PRM_GAP_US) {
+        if (now_us - state_started_us >= PRM_GAP_US) {
             if (++encoding < count) show_encoding();
             else { state_started_us = time_us_64(); state = PRM_RETENTION; }
         }
         break;
     case PRM_RETENTION:
-        if (event_us - state_started_us >= PRM_RETENTION_US) start_choice();
+        if (now_us - state_started_us >= PRM_RETENTION_US) start_choice();
         break;
     case PRM_CHOICE:
+        if (event != CONTROL_NONE && event_us < onset_us) break;
+        if (event == CONTROL_NONE) event_us = now_us;
         if (event_us - onset_us >= PRM_TIMEOUT_US) end_choice(PRM_OMISSION, event_us);
         else if (event == CONTROL_CONFIRM && visited == 3) end_choice(selected == slots[trial] ? PRM_CORRECT : PRM_WRONG, event_us);
         else if (event == CONTROL_LEFT || event == CONTROL_RIGHT) {
@@ -176,7 +180,7 @@ bool prm_update(control_event_t event, uint64_t event_us) {
         }
         break;
     case PRM_INTERVAL:
-        if (event_us - state_started_us < PRM_INTERVAL_US) break;
+        if (now_us - state_started_us < PRM_INTERVAL_US) break;
         if (++trial < count) start_choice();
         else if (!training) finish(false);
         else {

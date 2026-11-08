@@ -73,8 +73,9 @@ def decode(topic, payload):
         if kind == "start":
             fields(d, ("kind", "duration_ms", "sample_ms", "tests_mask", "tremor_first", "protocol"))
             integer(d["duration_ms"]); integer(d["sample_ms"]); integer(d["kind"], 0, 6); integer(d["tests_mask"], 1, 15); boolean(d["tremor_first"])
-            if "mot_mpu" in d:
-                boolean(d["mot_mpu"])
+            for option in ("mot_mpu", "cognitive_mpu"):
+                if option in d:
+                    boolean(d[option])
             if e["seq"] != 0 or d["duration_ms"] not in (30000, 60000) or d["sample_ms"] not in (20, 40) or d["protocol"] != "tremo-adaptado-v1":
                 raise InvalidMessage("configuração inválida")
         elif kind in ("state", "end"):

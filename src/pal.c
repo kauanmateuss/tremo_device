@@ -18,10 +18,10 @@ static void corner(uint8_t position, bool selected) {
     npSetPixel((position % 2) * 4, (position / 2) * 4, selected ? 20 : 0, selected ? 20 : 0, 20);
 }
 
-static void draw_choice(void) {
+static uint64_t draw_choice(void) {
     patterns_draw(patterns[order[trial]]);
     for (uint8_t p = 0; p < PAL_MAX_PAIRS; ++p) corner(p, p == cursor);
-    npWrite(); // Um único envio; nenhuma cor indica a resposta correta.
+    return npWriteTimed(); // Um único envio; nenhuma cor indica a resposta correta.
 }
 
 static void export_result(void) {
@@ -89,8 +89,7 @@ static void show_encoding(void) {
     uint8_t pair = order[encoding];
     patterns_draw(patterns[pair]);
     corner(positions[pair], false);
-    npWrite();
-    state_started_us = time_us_64();
+    state_started_us = npWriteTimed();
     state = PAL_ENCODING;
 }
 
@@ -119,8 +118,7 @@ static void start_choice(void) {
     const char *lines[] = {training ? "TREINO PAL" : "PAL", "QUAL ERA CANTO?", progress, "CURSOR BRANCO", "MOVA JOYSTICK", "A CONFIRMA", "LIMITE 15 S", "B ENCERRA"};
     display_show_lines(lines, 8);
     cursor = 0;
-    draw_choice();
-    onset_us = time_us_64();
+    onset_us = draw_choice();
     state = PAL_CHOICE;
 }
 
@@ -185,9 +183,13 @@ void pal_begin(void) {
 }
 
 bool pal_update(control_event_t event, uint64_t event_us) {
+    return pal_update_captured(event, event_us, event_us);
+}
+
+bool pal_update_captured(control_event_t event, uint64_t event_us, uint64_t now_us) {
     if (state == PAL_RESULTS) return event == CONTROL_CONFIRM || event == CONTROL_BACK;
     if (event == CONTROL_BACK) {
-        if (state == PAL_CHOICE) record_choice(PAL_ABORTED, event_us);
+        if (state == PAL_CHOICE) record_choice(PAL_ABORTED, now_us);
         finish(true);
         return false;
     }
@@ -196,22 +198,24 @@ bool pal_update(control_event_t event, uint64_t event_us) {
         if (event == CONTROL_CONFIRM) start_level();
         break;
     case PAL_ENCODING:
-        if (event_us - state_started_us >= PAL_ENCODING_US) {
-            patterns_clear(); state_started_us = time_us_64(); state = PAL_GAP;
+        if (now_us - state_started_us >= PAL_ENCODING_US) {
+            state_started_us = patterns_clear(); state = PAL_GAP;
         }
         break;
     case PAL_GAP:
-        if (event_us - state_started_us >= PAL_GAP_US) {
+        if (now_us - state_started_us >= PAL_GAP_US) {
             if (++encoding < pairs) show_encoding();
             else { state_started_us = time_us_64(); state = PAL_RETENTION; }
         }
         break;
     case PAL_RETENTION:
-        if (event_us - state_started_us >= PAL_RETENTION_US) {
+        if (now_us - state_started_us >= PAL_RETENTION_US) {
             shuffle_order(); start_choice(); // Ordem de consulta independente da exposição.
         }
         break;
     case PAL_CHOICE:
+        if (event != CONTROL_NONE && event_us < onset_us) break;
+        if (event == CONTROL_NONE) event_us = now_us;
         if (event_us - onset_us >= PAL_TIMEOUT_US) end_choice(PAL_OMISSION, event_us);
         else if (event == CONTROL_CONFIRM) end_choice(cursor == positions[order[trial]] ? PAL_CORRECT : PAL_WRONG, event_us);
         else {
@@ -224,7 +228,7 @@ bool pal_update(control_event_t event, uint64_t event_us) {
         }
         break;
     case PAL_INTERVAL:
-        if (event_us - state_started_us < PAL_INTERVAL_US) break;
+        if (now_us - state_started_us < PAL_INTERVAL_US) break;
         if (++trial < pairs) start_choice();
         else end_round();
         break;

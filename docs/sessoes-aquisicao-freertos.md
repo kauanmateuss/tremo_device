@@ -137,3 +137,30 @@ Aceite na placa: conclua os três treinos e dez tentativas, incluindo resposta
 normal, antecipação e omissão. Compare a borda do botão e a emissão do LED com
 os timestamps em pelo menos 30 respostas. Registre erro médio/máximo.
 A meta inicial é erro absoluto de até 10 ms, a validar em bancada.
+
+# Task 10 — PRM, PAL e coleta nos quatro testes
+
+PRM e PAL agora recebem separadamente o instante de captura da resposta e o
+relógio atual da FSM. Os prazos de exposição, retenção e intervalo usam o
+relógio atual. As respostas usam o timestamp da entrada, preservando a latência
+quando o consumidor demora. Entradas anteriores à apresentação da escolha são
+ignoradas. O início das apresentações vem do timestamp da TaskDisplay.
+
+A opção passa a se chamar `MPU COG SIM` e vale para MOT, RTI, PRM e PAL,
+inclusive nas baterias. O campo opcional de início passa a ser
+`cognitive_mpu`. O receptor continua aceitando as mensagens anteriores.
+As regras de pausa segura dos testes de memória permanecem: a pausa solicitada
+durante a memorização aguarda uma fronteira segura. A coleta pausa junto com a
+sessão e uma falha MPU encerra a etapa em erro.
+
+Os arquivos centrais são `prm.c/.h`, `pal.c/.h`, `patterns.c/.h`,
+`app.c` e `assessment.c`. O início de estímulos MOT também passa a aproveitar
+o timestamp devolvido pela matriz. Os testes incluem confirmação enfileirada
+antes do limite, comandos anteriores ao estímulo, captura MPU durante PRM/PAL
+e pausa/falha de sensor em todos os testes cognitivos.
+
+Aceite na placa: com MPU COG ativado, conclua o treino e a avaliação de PRM e
+PAL. Confira associações, acertos, erros, omissões e IDs dos registros. Peça
+pausa durante a memorização e verifique que só ocorre na fronteira prevista.
+Repita com MPU COG desligado. Use o mesmo roteiro para verificar a coleta
+durante RTI. Grave logs para comparar contagens e temporização.
