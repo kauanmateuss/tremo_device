@@ -39,3 +39,5 @@ int main(void) {
     for (unsigned int i = 0; i < LED_COUNT; ++i) assert(words[i] == 0);
     puts("PASS matriz: coordenadas, serpentina, GRB e limites");
 }
+
+uint64_t time_us_64(void) { return 1234; }

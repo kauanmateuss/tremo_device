@@ -107,8 +107,7 @@ static void start_wait(control_button_state_t button) {
 static void present_stimulus(void) {
     npClear();
     npSetPixel(2, 2, 0, 20, 0);
-    npWrite();
-    current.onset_us = time_us_64(); // Referência após envio/latch; não medição óptica.
+    current.onset_us = npWriteTimed(); // Timestamp de saída antes da notificação à TaskSession.
     current.stimulus_shown = true;
     state = RTI_STIMULUS;
 }

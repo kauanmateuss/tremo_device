@@ -116,3 +116,24 @@ O teste POSIX executa o MOT real enquanto a TaskMPU coleta, incluindo saídas
 lentas e uma resposta enfileirada. Os testes de fluxo cobrem a opção do menu,
 calibração, finalização, pausa, erro de sensor e integração na bateria.
 A precisão temporal e o fluxo completo dos 13 alvos ainda exigem a placa.
+
+# Task 09 — Temporização do RTI
+
+A TaskDisplay devolve o timestamp logo após transmitir/latch da matriz.
+`npWriteTimed()` carrega esse instante até o RTI. A diferença entre a borda de
+soltura capturada pela TaskInput e esse instante produz o tempo de reação,
+mesmo quando a TaskSession demora para voltar a executar.
+
+As regras de antecipação, omissão e debounce continuam no RTI. Uma soltura
+capturada antes do limite pode chegar pela fila após o limite e ainda ser
+classificada corretamente. O timestamp do LED é uma referência de software
+após a transmissão. A diferença para a emissão óptica exige medição na placa.
+
+Arquivos principais: `matrix.c/.h`, `display_task.c/.h` e `rti.c`.
+Os testes verificam a confirmação com timestamp, atraso ao retomar a sessão
+e atraso na entrega da soltura, além dos 13 registros do protocolo existente.
+
+Aceite na placa: conclua os três treinos e dez tentativas, incluindo resposta
+normal, antecipação e omissão. Compare a borda do botão e a emissão do LED com
+os timestamps em pelo menos 30 respostas. Registre erro médio/máximo.
+A meta inicial é erro absoluto de até 10 ms, a validar em bancada.

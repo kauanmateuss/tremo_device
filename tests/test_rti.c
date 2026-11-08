@@ -29,6 +29,13 @@ void display_show_lines(const char *lines[], size_t n) {
 }
 void npClear(void) { lit = false; }
 void npWrite(void) { clock_us += 1000; }
+static uint64_t resume_delay_us;
+uint64_t npWriteTimed(void) {
+    npWrite();
+    uint64_t sent_us = time_us_64();
+    clock_us += resume_delay_us;
+    return sent_us;
+}
 void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b) {
     assert(x == 2 && y == 2 && r == 0 && g == 20 && b == 0);
     lit = true;
@@ -158,5 +165,25 @@ int main(void) {
     assert(rti_result()->records[0].outcome == RTI_ABORTED && rti_result()->records[0].stimulus_shown);
     rti_begin(); step(CONTROL_BACK, 0);
     assert(rti_result()->record_count == 0 && rti_result()->interrupted);
+    usb = false;
+    rti_begin();
+    control_button_state_t held = {.pressed = true, .settled = true};
+    assert(!rti_update(CONTROL_CONFIRM, held, clock_us));
+    control_button_state_t released = {.pressed = false, .settled = true};
+    assert(!rti_update(CONTROL_CONFIRM_RELEASE, released, clock_us));
+    held.edge_us = clock_us;
+    assert(!rti_update(CONTROL_CONFIRM, held, clock_us));
+    clock_us += RTI_MAX_WAIT_US;
+    resume_delay_us = 50000;
+    assert(!rti_update(CONTROL_NONE, held, clock_us));
+    assert(rti_get_state() == RTI_STIMULUS);
+    uint64_t actual_onset = clock_us - resume_delay_us;
+    resume_delay_us = 0;
+    released.edge_us = actual_onset + 250000;
+    clock_us = actual_onset + RTI_RESPONSE_LIMIT_US + 100000;
+    assert(!rti_update(CONTROL_CONFIRM_RELEASE, released, clock_us));
+    assert(rti_result()->records[0].outcome == RTI_RESPONSE);
+    assert(rti_result()->records[0].onset_us == actual_onset);
+    assert(rti_result()->records[0].release_us - actual_onset == 250000);
     puts("PASS RTI: treino, espera variavel, bordas temporais, respostas, antecipacoes, omissoes e aborto");
 }

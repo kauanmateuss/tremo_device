@@ -26,7 +26,9 @@ void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b);
 // Altera somente o buffer; use npWrite para atualizar os LEDs.
 void npClear(void);
 void npWrite(void);
+// Retorna o timestamp após transmissão/latch, capturado pela tarefa de saída.
+uint64_t npWriteTimed(void);
 // Transferência física usada pela TaskDisplay. O chamador mantém o frame estável.
-void matrix_write_frame(const npLED_t *pixels);
+uint64_t matrix_write_frame(const npLED_t *pixels);
 
 #endif // MATRIX_H
