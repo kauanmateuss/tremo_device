@@ -11,70 +11,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-static mqtt_client_t client;
-static mqtt_connection_cb_t connection_cb;
-static mqtt_request_cb_t request_cb;
-static void *connection_arg, *request_arg;
-static int link = CYW43_LINK_UP;
-static unsigned joins, polls, publications;
-static uint64_t offset_us;
-int cyw43_state;
-
-static void network_owner(void) {
-    assert(strcmp(pcTaskGetName(NULL), "TaskMQTT") == 0);
-}
-uint64_t time_us_64(void) { return (uint64_t)xTaskGetTickCount() * 1000 + offset_us; }
-int cyw43_arch_init(void) { network_owner(); vTaskDelay(100); return 0; }
-void cyw43_arch_enable_sta_mode(void) { network_owner(); }
-int cyw43_tcpip_link_status(int *state, int itf) {
-    (void)state; (void)itf; network_owner(); return link;
-}
-void cyw43_arch_poll(void) {
-    network_owner(); ++polls;
-    if (connection_cb && link == CYW43_LINK_UP) {
-        mqtt_connection_cb_t callback = connection_cb;
-        connection_cb = NULL; client.connected = 1;
-        callback(&client, connection_arg, MQTT_CONNECT_ACCEPTED);
-    }
-    if (request_cb && link == CYW43_LINK_UP) {
-        mqtt_request_cb_t callback = request_cb;
-        request_cb = NULL; callback(request_arg, ERR_OK);
-    }
-}
-int cyw43_arch_wifi_connect_async(const char *ssid, const char *password, uint32_t auth) {
-    (void)ssid; (void)password; (void)auth; network_owner(); ++joins; vTaskDelay(50); return 0;
-}
-void pico_get_unique_board_id_string(char *out, unsigned length) {
-    snprintf(out, length, "ABCDEF0123456789");
-}
-int ipaddr_aton(const char *host, ip_addr_t *address) {
-    (void)host; (void)address; network_owner(); return 1;
-}
-mqtt_client_t *mqtt_client_new(void) { network_owner(); return &client; }
-void mqtt_disconnect(mqtt_client_t *value) {
-    network_owner(); value->connected = 0; connection_cb = NULL; request_cb = NULL;
-}
-int mqtt_client_is_connected(mqtt_client_t *value) { network_owner(); return value->connected; }
-err_t mqtt_client_connect(mqtt_client_t *value, const ip_addr_t *address, uint16_t port,
-                         mqtt_connection_cb_t callback, void *arg, const struct mqtt_connect_client_info_t *info) {
-    (void)value; (void)address; (void)port; (void)info; network_owner();
-    connection_cb = callback; connection_arg = arg; return ERR_OK;
-}
-err_t mqtt_publish(mqtt_client_t *value, const char *topic, const void *payload,
-                   uint16_t length, uint8_t qos, uint8_t retain, mqtt_request_cb_t callback, void *arg) {
-    (void)value; network_owner();
-    assert(qos == 1 && retain == 0 && length == strlen(payload));
-    assert(strstr(topic, "abcdef0123456789") && strstr(payload, "\"session\""));
-    request_cb = callback; request_arg = arg; ++publications; return ERR_OK;
-}
-void panic(const char *format, ...) { (void)format; abort(); }
-void rtos_assert_failed(const char *file, int line) {
-    fprintf(stderr, "RTOS assert %s:%d\n", file, line); abort();
-}
-void vApplicationMallocFailedHook(void) { abort(); }
-void vApplicationStackOverflowHook(TaskHandle_t task, char *name) {
-    (void)task; (void)name; abort();
-}
+#include "network_fixture.h"
 
 static void producer(void *parameter) {
     (void)parameter;
@@ -85,21 +22,21 @@ static void producer(void *parameter) {
         vTaskDelay(5); // Continua produzindo durante a inicialização lenta do rádio.
     }
     vTaskDelay(500);
-    assert(polls && publications == 21 && telemetry_pending() == 0);
+    assert(mock_polls && mock_publications == 21 && telemetry_pending() == 0);
     assert(communication_status() == COMM_ONLINE);
-    link = 0;
+    mock_link = 0;
     vTaskDelay(100);
-    assert(joins == 1 && communication_status() != COMM_ONLINE);
+    assert(mock_joins == 1 && communication_status() != COMM_ONLINE);
     for (unsigned i = 0; i < 120; ++i)
         telemetry_emit(session_current()->id, time_us_64(), "trial", true, "{}");
     assert(telemetry_pending() == TELEMETRY_CAPACITY && telemetry_dropped() == 24);
-    taskENTER_CRITICAL(); offset_us += 16000000; taskEXIT_CRITICAL();
+    taskENTER_CRITICAL(); mock_offset_us += 16000000; taskEXIT_CRITICAL();
     communication_update(COMM_SUSPENDED); // A FSM não paralisa a tarefa de rede.
-    vTaskDelay(100); assert(joins >= 2);
-    link = CYW43_LINK_UP;
+    vTaskDelay(100); assert(mock_joins >= 2);
+    mock_link = CYW43_LINK_UP;
     vTaskDelay(1500);
     assert(communication_status() == COMM_ONLINE && telemetry_pending() == 0);
-    assert(publications == 21 + TELEMETRY_CAPACITY);
+    assert(mock_publications == 21 + TELEMETRY_CAPACITY);
     puts("PASS RTOS rede: dono único, produção durante conexão lenta, fila cheia e recuperação");
     exit(0);
 }
