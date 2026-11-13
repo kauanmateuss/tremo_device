@@ -2,7 +2,52 @@
 #include <stdio.h>
 #include <string.h>
 #include "telemetry.h"
+
+static void test_payload_limits(void) {
+    telemetry_init("0123456789abcdef", true);
+    session_init(12);
+    session_begin(SESSION_MOT, 100);
+    telemetry_ack();
+
+    // Cada linha MPU tem um buffer de 256 bytes. Exercita até sua capacidade,
+    // maior que as leituras reais, com o timestamp de maior largura possível.
+    char row[256];
+    row[0] = '[';
+    for (unsigned i = 1; i < 254; ++i) row[i] = i % 2 ? '0' : ',';
+    row[254] = ']';
+    row[255] = '\0';
+    telemetry_emit(session_current()->id, UINT64_MAX, "samples", false,
+        "{\"module\":\"mpu\",\"rows\":[%s,%s]}", row, row);
+    assert(telemetry_pending() == 1 && telemetry_dropped() == 0);
+    // A sequência atual tem um dígito; UINT32_MAX tem dez.
+    assert(strlen(telemetry_peek()) + 9 + 1 <= TELEMETRY_PAYLOAD);
+    char copy[TELEMETRY_PAYLOAD];
+    assert(telemetry_copy(copy, sizeof(copy)));
+    assert(strcmp(copy, telemetry_peek()) == 0);
+    assert(!telemetry_copy(copy, strlen(telemetry_peek())));
+    telemetry_ack();
+
+    // Aceita exatamente o limite, mas rejeita um byte a mais sem enfileirar
+    // JSON parcial. O envelope permanece igual nas próximas duas emissões.
+    telemetry_emit(session_current()->id, 100, "trial", true, "%s", "");
+    size_t envelope = strlen(telemetry_peek());
+    telemetry_ack();
+    char body[TELEMETRY_PAYLOAD];
+    size_t length = TELEMETRY_PAYLOAD - envelope - 1;
+    memset(body, ' ', length + 1);
+    body[0] = '0'; // Número JSON seguido por espaços.
+    body[length] = '\0';
+    telemetry_emit(session_current()->id, 100, "trial", true, "%s", body);
+    assert(telemetry_pending() == 1 && strlen(telemetry_peek()) == TELEMETRY_PAYLOAD - 1);
+    telemetry_ack();
+    body[length] = ' ';
+    body[length + 1] = '\0';
+    telemetry_emit(session_current()->id, 100, "trial", true, "%s", body);
+    assert(telemetry_pending() == 0 && telemetry_dropped() == 1);
+}
+
 int main(void) {
+    test_payload_limits();
     telemetry_init("0123456789abcdef", true); session_init(12); session_begin(SESSION_MOT, 100);
     assert(telemetry_pending() == 1 && strstr(telemetry_peek(), "\"seq\":0"));
     char first[TELEMETRY_PAYLOAD]; strcpy(first, telemetry_peek());

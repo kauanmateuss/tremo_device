@@ -30,7 +30,6 @@ typedef struct {
     bool ready;
     bool valid;
     char setup_error[MPU6050_DIAG_SIZE];
-    uint32_t timestamp_ms;
     int16_t accel[3];
     int16_t gyro[3];
     int16_t bias[3];
@@ -264,7 +263,6 @@ static bool acquire(uint32_t now_ms) {
         else if (sample.timestamp_us - first_us > result.max_pair_skew_us) result.max_pair_skew_us = sample.timestamp_us - first_us;
         sensor->valid = mpu6050_read_raw(sensor->accel, sensor->gyro, sensor->address);
         sensor->ready = sensor->valid;
-        sensor->timestamp_ms = to_ms_since_boot(get_absolute_time());
         if (sensor->valid) ++result.valid[i];
         else { ++result.errors[i]; success = false; }
         sample.valid = sensor->valid;

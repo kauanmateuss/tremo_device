@@ -44,12 +44,15 @@ bool display_task_init(void) {
 
 static bool transfer(display_request_t request) {
     bool success = false;
-    configASSERT(xSemaphoreTake(transfer_mutex, portMAX_DELAY) == pdTRUE);
+    BaseType_t taken = xSemaphoreTake(transfer_mutex, portMAX_DELAY);
+    configASSERT(taken == pdTRUE);
     request.caller = xTaskGetCurrentTaskHandle();
     request.success = &success;
-    configASSERT(xQueueSend(requests, &request, portMAX_DELAY) == pdTRUE);
+    BaseType_t sent = xQueueSend(requests, &request, portMAX_DELAY);
+    configASSERT(sent == pdTRUE);
     // A notificação de índice 0 fica reservada para a conclusão desta chamada.
-    configASSERT(ulTaskNotifyTake(pdTRUE, portMAX_DELAY) == 1);
+    uint32_t notified = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    configASSERT(notified == 1);
     xSemaphoreGive(transfer_mutex);
     return success;
 }
