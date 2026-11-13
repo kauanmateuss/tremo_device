@@ -34,6 +34,10 @@ option(TREMO_MQTT "Habilita Wi-Fi/MQTT na Pico W" ON)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
+set(FREERTOS_KERNEL_PATH "${CMAKE_CURRENT_LIST_DIR}/../FreeRTOS-Kernel" CACHE PATH "Caminho do clone do FreeRTOS Kernel")
+set(FREERTOS_CONFIG_FILE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/include")
+add_subdirectory("${FREERTOS_KERNEL_PATH}/portable/ThirdParty/GCC/RP2040" freertos)
+
 # Add executable. Default name is the project name, version 0.1
 
 add_executable(tremo_device main.c 
@@ -71,7 +75,8 @@ target_compile_definitions(tremo_device PRIVATE PICO_STDIO_USB_STDOUT_TIMEOUT_US
 # Add the standard library to the build
 target_link_libraries(tremo_device
         pico_stdlib
-        pico_rand)
+        pico_rand
+        FreeRTOS-Kernel-Heap4)
 
 # Add the standard include files to the build
 target_include_directories(tremo_device PRIVATE
