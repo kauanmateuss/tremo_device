@@ -40,7 +40,8 @@ add_subdirectory("${FREERTOS_KERNEL_PATH}/portable/ThirdParty/GCC/RP2040" freert
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(tremo_device main.c 
+add_executable(tremo_device main.c
+            src/rtos_hooks.c
             src/matrix.c
             src/ssd1306_i2c.c
             src/display.c

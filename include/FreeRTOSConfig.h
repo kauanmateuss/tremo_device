@@ -11,8 +11,26 @@
 #define configUSE_IDLE_HOOK             0
 #define configUSE_TICK_HOOK             0
 
-/* O laço atual usa o SDK antes da partida do scheduler (Task 03). */
+/* Esperas do SDK continuam independentes. A aplicação usa vTaskDelay. */
+#define INCLUDE_xTimerPendFunctionCall  1
+#define INCLUDE_vTaskDelay             1
+#define configUSE_TIMERS               1
+#define configTIMER_TASK_PRIORITY      3
+#define configTIMER_QUEUE_LENGTH       8
+#define configTIMER_TASK_STACK_DEPTH   256
+#define configCHECK_FOR_STACK_OVERFLOW 2
+#define configUSE_MALLOC_FAILED_HOOK   1
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+void rtos_assert_failed(const char *file, int line);
+#ifdef __cplusplus
+}
+#endif
+#define configASSERT(condition) do { if (!(condition)) rtos_assert_failed(__FILE__, __LINE__); } while (0)
+
 #define configSUPPORT_PICO_TIME_INTEROP 0
-#define configSUPPORT_PICO_SYNC_INTEROP 0
+#define configSUPPORT_PICO_SYNC_INTEROP 1
 
 #endif
