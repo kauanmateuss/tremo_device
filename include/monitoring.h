@@ -45,6 +45,8 @@ void monitoring_init(void);
 bool monitoring_prepare(void);
 bool monitoring_sensor_ready(unsigned int index);
 void monitoring_start(uint32_t now_ms);
+// Coleta até a TaskSession encerrar a avaliação ou ocorrer falha de sensor.
+void monitoring_start_continuous(uint32_t now_ms);
 void monitoring_pause(uint32_t now_ms);
 void monitoring_resume(uint32_t now_ms);
 // No firmware RTOS, consulta a saúde da captura feita pela TaskMPU.

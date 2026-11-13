@@ -34,12 +34,14 @@ typedef struct {
     mot_record_t records[MOT_MAX_RECORDS];
 } mot_result_t;
 
-// Requer matriz e OLED inicializados. Inicia pelas instruções, sem coleta MPU.
+// Requer matriz e OLED inicializados. A TaskSession coordena a coleta MPU.
 void mot_begin(void);
 // Só após pausa em fronteira segura; desloca o relógio do intervalo.
 void mot_resume_after_pause(uint64_t delta_us);
 // true pede retorno ao menu cognitivo. event_us é o instante de detecção do evento.
 bool mot_update(control_event_t event, uint64_t event_us);
+// Separa o timestamp de captura do instante em que a FSM processa a entrada.
+bool mot_update_captured(control_event_t event, uint64_t event_us, uint64_t now_us);
 // Exporta registros retidos ao conectar USB, somente fora de uma execução ativa.
 void mot_serial_update(void);
 mot_state_t mot_get_state(void);

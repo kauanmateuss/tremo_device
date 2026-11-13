@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "mpu_task.h"
+#include "mot.h"
+#include "matrix.h"
 #include "monitoring.h"
 #include "mpu6050_i2c.h"
 #include "session.h"
@@ -34,6 +36,11 @@ void display_show_lines(const char *lines[], size_t count) {
     (void)lines; (void)count;
     assert(xTaskGetCurrentTaskHandle() == consumer_handle);
     vTaskDelay(100);
+}
+void npClear(void) {}
+void npWrite(void) { vTaskDelay(1); }
+void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b) {
+    (void)x; (void)y; (void)r; (void)g; (void)b;
 }
 bool telemetry_enabled(void) { return transmit; }
 unsigned telemetry_pending(void) { return 0; }
@@ -100,6 +107,24 @@ static void consumer(void *parameter) {
         assert(sample.timestamp_us >= previous && sample.read_us >= 1000);
         previous = sample.timestamp_us;
     }
+
+    monitoring_start_continuous(now_ms());
+    mot_begin();
+    assert(!mot_update(CONTROL_CONFIRM, time_us_64()));
+    assert(mot_get_state() == MOT_STIMULUS);
+    before = monitoring_result()->valid[0];
+    assert(!mot_update(CONTROL_LEFT, time_us_64()));
+    uint64_t response = time_us_64();
+    vTaskDelay(50); // Resposta ficou na fila enquanto o consumidor esperava.
+    assert(!mot_update_captured(CONTROL_CONFIRM, response, time_us_64()));
+    assert(mot_result()->records[0].outcome == MOT_CORRECT);
+    assert(mot_result()->records[0].elapsed_us == response - mot_result()->records[0].onset_us);
+    assert(monitoring_result()->valid[0] > before);
+    vTaskDelay(180); // A avaliação pode durar mais que a janela de tremores.
+    before = monitoring_result()->valid[0];
+    vTaskDelay(40);
+    assert(monitoring_result()->valid[0] > before);
+    monitoring_stop(now_ms(), MONITORING_COMPLETE);
 
     session.config.duration_ms = 500;
     monitoring_start(now_ms());

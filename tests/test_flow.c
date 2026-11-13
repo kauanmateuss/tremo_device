@@ -162,6 +162,58 @@ static void exercise_evaluations(void) {
     assert(app_get_state() == APP_EVAL_RESULTS && session_current()->state == SESSION_INTERRUPTED);
     assert(evaluation_current()->steps[0].status == STEP_COMPLETE && evaluation_current()->steps[1].status == STEP_INTERRUPTED);
 }
+static void exercise_mot_capture(void) {
+    matrix_ok = true; healthy[0] = healthy[1] = true;
+    app_init(); step(CONTROL_NONE, 2000);
+    step(CONTROL_UP, 5); step(CONTROL_CONFIRM, 5); // Configurações.
+    step(CONTROL_UP, 5);
+    assert(strcmp(screen[1], "MPU MOT NAO") == 0);
+    step(CONTROL_CONFIRM, 5);
+    assert(session_config()->mot_mpu && strcmp(screen[1], "MPU MOT SIM") == 0);
+    step(CONTROL_BACK, 5);
+    step(CONTROL_DOWN, 5); step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_PREPARING);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
+    step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 5); finish_calibration();
+    assert(strcmp(screen[0], "MOT + MPU") == 0);
+    step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_MOT);
+    unsigned before = reads;
+    complete_mot();
+    assert(reads > before && monitoring_result()->session_id == mot_result()->session_id);
+    assert(monitoring_result()->reason == MONITORING_COMPLETE);
+    assert(session_current()->state == SESSION_COMPLETE);
+
+    step(CONTROL_BACK, 5); step(CONTROL_CONFIRM, 5);
+    step(CONTROL_NONE, 5); finish_calibration(); step(CONTROL_CONFIRM, 5);
+    step(CONTROL_CONFIRM, 5); step(CONTROL_PAUSE, 5);
+    step(CONTROL_LEFT, 50); step(CONTROL_CONFIRM, 50);
+    assert(session_current()->state == SESSION_PAUSED);
+    before = reads;
+    step(CONTROL_NONE, 5000); assert(reads == before);
+    step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 50);
+    assert(reads > before && session_current()->state == SESSION_RUNNING);
+    healthy[1] = false;
+    step(CONTROL_NONE, 50);
+    assert(session_current()->state == SESSION_ERROR);
+    assert(mot_result()->interrupted && monitoring_result()->reason == MONITORING_SENSOR_ERROR);
+    assert(strcmp(screen[0], "FALHA MPU") == 0);
+    healthy[1] = true;
+
+    // Também mantém o ID da bateria e marca erro na etapa MOT.
+    app_init(); step(CONTROL_NONE, 2000);
+    session_config_t c = *session_config(); c.mot_mpu = true; c.tests_mask = 1;
+    assert(session_configure(c));
+    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5); step(CONTROL_UP, 5);
+    step(CONTROL_CONFIRM, 5); step(CONTROL_CONFIRM, 5);
+    assert(app_get_state() == APP_PREPARING);
+    step(CONTROL_NONE, 5); finish_calibration(); step(CONTROL_CONFIRM, 5);
+    assert(monitoring_result()->session_id == evaluation_current()->session_id);
+    healthy[1] = false; step(CONTROL_NONE, 50);
+    assert(app_get_state() == APP_EVAL_RESULTS && session_current()->state == SESSION_ERROR);
+    assert(evaluation_current()->steps[0].status == STEP_ERROR);
+    healthy[1] = true;
+}
+
 int main(void) {
     app_init();
     assert(app_get_state() == APP_WELCOME);
@@ -304,6 +356,7 @@ int main(void) {
     assert(app_get_state() == APP_PAL_ERROR);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     exercise_evaluations();
+    exercise_mot_capture();
     puts("PASS FSM: menu, preparo, inicio, interrupcao, conclusao, falha e resultados");
     return 0;
 }

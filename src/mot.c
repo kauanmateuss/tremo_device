@@ -146,10 +146,14 @@ void mot_begin(void) {
 }
 
 bool mot_update(control_event_t event, uint64_t event_us) {
+    return mot_update_captured(event, event_us, event_us);
+}
+
+bool mot_update_captured(control_event_t event, uint64_t event_us, uint64_t now_us) {
     if (state == MOT_RESULTS)
         return event == CONTROL_CONFIRM || event == CONTROL_BACK;
     if (event == CONTROL_BACK) {
-        if (state == MOT_STIMULUS) record_trial(MOT_ABORTED, event_us);
+        if (state == MOT_STIMULUS) record_trial(MOT_ABORTED, now_us);
         finish(true);
         return false;
     }
@@ -158,6 +162,9 @@ bool mot_update(control_event_t event, uint64_t event_us) {
         if (event == CONTROL_CONFIRM) start_trial();
         break;
     case MOT_STIMULUS:
+        // Entradas capturadas antes de apresentar este alvo não valem para ele.
+        if (event != CONTROL_NONE && event_us < onset_us) break;
+        if (event == CONTROL_NONE) event_us = now_us;
         // No limite, a omissão tem prioridade sobre a confirmação.
         if (event_us - onset_us >= MOT_TIMEOUT_US) end_trial(MOT_OMISSION, event_us);
         else if (event == CONTROL_CONFIRM) {
@@ -173,7 +180,7 @@ bool mot_update(control_event_t event, uint64_t event_us) {
         }
         break;
     case MOT_INTERVAL:
-        if (event_us - interval_started_us < MOT_INTERVAL_US) break;
+        if (now_us < interval_started_us || now_us - interval_started_us < MOT_INTERVAL_US) break;
         ++trial;
         if (trial < (training ? MOT_TRAINING_TRIALS : MOT_TEST_TRIALS)) start_trial();
         else if (!training) finish(false);

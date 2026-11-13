@@ -13,7 +13,7 @@ kernel = args.kernel.resolve()
 port = kernel / "portable/ThirdParty/GCC/Posix"
 suites = {
     "display_task": ["src/display_task.c"],
-    "mpu_task": ["src/mpu_task.c", "src/monitoring.c"],
+    "mpu_task": ["src/mpu_task.c", "src/monitoring.c", "src/mot.c"],
     "input_task": ["src/input_task.c", "src/controls.c"],
 }
 with tempfile.TemporaryDirectory(prefix="tremo-rtos-tests-") as directory:
