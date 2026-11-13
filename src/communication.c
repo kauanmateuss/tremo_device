@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
+#ifdef TREMO_FREERTOS_ENABLED
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
 #ifndef TREMO_MQTT_ENABLED
 #define TREMO_MQTT_ENABLED 0
 #endif
@@ -23,14 +27,19 @@ static char client_id[24], topic[64];
 static bool ready, connecting, inflight, suspended, deferred;
 static uint64_t retry_us, wifi_retry_us, sent_us;
 static unsigned backoff_s = 1;
+static char sending[TELEMETRY_PAYLOAD];
+#ifdef TREMO_FREERTOS_ENABLED
+static communication_status_t cached_status = COMM_NO_RADIO;
+static void task_network(void *parameter);
+#endif
 static void retry(void) {
     retry_us = time_us_64() + (uint64_t)backoff_s * 1000000;
     if (backoff_s < 32) backoff_s *= 2;
 }
 static void connection(mqtt_client_t *c, void *arg, mqtt_connection_status_t status) {
     (void)c; (void)arg; connecting = false;
-    if (status == MQTT_CONNECT_ACCEPTED) { backoff_s = 1; printf("# MQTT conectado\n"); }
-    else { inflight = false; retry(); printf("# MQTT desconectado status=%u\n", status); }
+    if (status == MQTT_CONNECT_ACCEPTED) { backoff_s = 1; }
+    else { inflight = false; retry(); }
 }
 static void published(void *arg, err_t err) {
     (void)arg;
@@ -38,26 +47,34 @@ static void published(void *arg, err_t err) {
     inflight = false;
     if (err != ERR_OK) { mqtt_disconnect(client); connecting = false; retry(); }
 }
-void communication_init(void) {
-    char device[17]; pico_get_unique_board_id_string(device, sizeof(device));
-    // O SDK usa A..F; o contrato JSON e o tópico usam hexadecimal minúsculo.
-    for (unsigned i = 0; device[i]; ++i)
-        if (device[i] >= 'A' && device[i] <= 'F') device[i] += 'a' - 'A';
-    bool configured = TREMO_WIFI_SSID[0] != 0;
-    telemetry_init(device, configured);
-    if (!configured) { printf("# MQTT: preencher config/network_config.h\n"); return; }
-    if (!ipaddr_aton(TREMO_MQTT_HOST, &broker) || cyw43_arch_init()) { printf("# MQTT: falha ao iniciar rede\n"); return; }
+static void start_network(void) {
+    if (!ipaddr_aton(TREMO_MQTT_HOST, &broker) || cyw43_arch_init()) return;
     cyw43_arch_enable_sta_mode();
     client = mqtt_client_new();
-    if (!client) { printf("# MQTT: sem memoria\n"); return; }
-    snprintf(client_id, sizeof(client_id), "tremo-%s", device);
-    snprintf(topic, sizeof(topic), "tremo/v1/devices/%s/events", device);
+    if (!client) return;
     info = (struct mqtt_connect_client_info_t){.client_id = client_id, .keep_alive = 30,
         .client_user = TREMO_MQTT_USER[0] ? TREMO_MQTT_USER : NULL,
         .client_pass = TREMO_MQTT_USER[0] ? TREMO_MQTT_PASSWORD : NULL};
     ready = true;
 }
-communication_status_t communication_status(void) {
+
+void communication_init(void) {
+    char device[17]; pico_get_unique_board_id_string(device, sizeof(device));
+    for (unsigned i = 0; device[i]; ++i)
+        if (device[i] >= 'A' && device[i] <= 'F') device[i] += 'a' - 'A';
+    bool configured = TREMO_WIFI_SSID[0] != 0;
+    telemetry_init(device, configured);
+    if (!configured) return;
+    snprintf(client_id, sizeof(client_id), "tremo-%s", device);
+    snprintf(topic, sizeof(topic), "tremo/v1/devices/%s/events", device);
+#ifdef TREMO_FREERTOS_ENABLED
+    if (xTaskCreate(task_network, "TaskMQTT", 1536, NULL, 1, NULL) != pdPASS)
+        panic("FreeRTOS: falha ao criar TaskMQTT");
+#else
+    start_network();
+#endif
+}
+static communication_status_t read_status(void) {
     if (!ready) return COMM_NO_RADIO;
     switch (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA)) {
     case CYW43_LINK_UP: return mqtt_client_is_connected(client) ? COMM_ONLINE : COMM_BROKER_WAIT;
@@ -68,7 +85,7 @@ communication_status_t communication_status(void) {
     }
 }
 
-void communication_update(communication_mode_t mode) {
+static void service_network(communication_mode_t mode) {
     if (!ready) return;
     if (mode == COMM_SUSPENDED) {
         if (!suspended) { mqtt_disconnect(client); inflight = connecting = false; suspended = true; }
@@ -77,7 +94,7 @@ void communication_update(communication_mode_t mode) {
     if (suspended) { suspended = false; retry_us = 0; }
     // Mesmo a associação "async" envia comandos síncronos ao rádio. Sem uma
     // conexão utilizável, não entrar no driver durante a aquisição cronometrada.
-    if (mode == COMM_STREAM_ONLY && (deferred || communication_status() != COMM_ONLINE)) {
+    if (mode == COMM_STREAM_ONLY && (deferred || read_status() != COMM_ONLINE)) {
         deferred = true;
         return;
     }
@@ -89,7 +106,7 @@ void communication_update(communication_mode_t mode) {
         retry_us = 0;
     }
     cyw43_arch_poll();
-    if (mode == COMM_STREAM_ONLY && communication_status() != COMM_ONLINE) {
+    if (mode == COMM_STREAM_ONLY && read_status() != COMM_ONLINE) {
         deferred = true;
         return;
     }
@@ -98,10 +115,8 @@ void communication_update(communication_mode_t mode) {
     if (link != CYW43_LINK_UP) {
         if (now >= wifi_retry_us) {
             mqtt_disconnect(client); inflight = connecting = false;
-            printf("# WIFI tentativa link=%d\n", link);
-            int err = cyw43_arch_wifi_connect_async(TREMO_WIFI_SSID, TREMO_WIFI_PASSWORD,
+            cyw43_arch_wifi_connect_async(TREMO_WIFI_SSID, TREMO_WIFI_PASSWORD,
                 TREMO_WIFI_PASSWORD[0] ? CYW43_AUTH_WPA2_AES_PSK : CYW43_AUTH_OPEN);
-            if (err) printf("# WIFI erro ao iniciar tentativa=%d\n", err);
             wifi_retry_us = now + 15000000;
         }
         return;
@@ -116,12 +131,45 @@ void communication_update(communication_mode_t mode) {
     if (inflight && now - sent_us > 15000000) {
         mqtt_disconnect(client); inflight = connecting = false; retry(); return;
     }
-    const char *payload = telemetry_peek();
-    if (!inflight && payload) {
+    if (!inflight && telemetry_copy(sending, sizeof(sending))) {
         inflight = true; sent_us = now;
-        if (mqtt_publish(client, topic, payload, strlen(payload), 1, 0, published, NULL) != ERR_OK) inflight = false;
+        if (mqtt_publish(client, topic, sending, strlen(sending), 1, 0, published, NULL) != ERR_OK) inflight = false;
     }
 }
+#ifdef TREMO_FREERTOS_ENABLED
+static void task_network(void *parameter) {
+    (void)parameter;
+    start_network();
+    for (;;) {
+        service_network(COMM_NORMAL);
+        communication_status_t status = read_status();
+        taskENTER_CRITICAL();
+        cached_status = status;
+        taskEXIT_CRITICAL();
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+#endif
+
+communication_status_t communication_status(void) {
+#ifdef TREMO_FREERTOS_ENABLED
+    taskENTER_CRITICAL();
+    communication_status_t status = cached_status;
+    taskEXIT_CRITICAL();
+    return status;
+#else
+    return read_status();
+#endif
+}
+
+void communication_update(communication_mode_t mode) {
+#ifdef TREMO_FREERTOS_ENABLED
+    (void)mode; // A TaskMQTT atende a rede independentemente da FSM.
+#else
+    service_network(mode);
+#endif
+}
+
 #else
 void communication_init(void) { telemetry_init("0000000000000000", false); }
 communication_status_t communication_status(void) { return COMM_NO_RADIO; }

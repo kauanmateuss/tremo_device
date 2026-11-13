@@ -12,6 +12,7 @@ args = parser.parse_args()
 kernel = args.kernel.resolve()
 port = kernel / "portable/ThirdParty/GCC/Posix"
 suites = {
+    "network_task": ["src/communication.c", "src/telemetry.c", "src/session.c"],
     "display_task": ["src/display_task.c"],
     "mpu_task": ["src/mpu_task.c", "src/monitoring.c", "src/mot.c", "src/prm.c", "src/pal.c", "src/patterns.c"],
     "input_task": ["src/input_task.c", "src/controls.c"],
@@ -24,7 +25,9 @@ with tempfile.TemporaryDirectory(prefix="tremo-rtos-tests-") as directory:
             *[kernel / name for name in ("tasks.c", "queue.c", "list.c", "timers.c", "event_groups.c")],
             kernel / "portable/MemMang/heap_4.c", port / "port.c", port / "utils/wait_for_event.c",
         ]
-        defines = ["-DTREMO_FREERTOS_ENABLED=1"] if name == "mpu_task" else []
+        defines = ["-DTREMO_FREERTOS_ENABLED=1"] if name in ("mpu_task", "network_task") else []
+        if name == "network_task":
+            defines += ["-DTREMO_MQTT_ENABLED=1", "-I" + str(root / "tests/network_stubs")]
         subprocess.run([
             "cc", *defines, "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-pthread",
             "-I" + str(root / "tests/rtos_stubs"),
