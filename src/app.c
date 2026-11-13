@@ -215,6 +215,7 @@ static void enter_state(app_state_t next) {
 static void evaluation_end(session_state_t reason);
 static void finish_session(monitoring_end_t reason) {
     monitoring_stop(now_ms(), reason);
+    reason = monitoring_result()->reason;
     if (!evaluation_current()->active) session_finish(reason == MONITORING_COMPLETE ? SESSION_COMPLETE : reason == MONITORING_INTERRUPTED ? SESSION_INTERRUPTED : SESSION_ERROR, time_us_64());
     if (evaluation_current()->active) {
         evaluation_record(reason == MONITORING_COMPLETE ? STEP_COMPLETE : reason == MONITORING_INTERRUPTED ? STEP_INTERRUPTED : STEP_ERROR, 0, 0, 0);
