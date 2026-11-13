@@ -8,6 +8,7 @@
 #define configMAX_PRIORITIES            5
 #define configMINIMAL_STACK_SIZE        256  /* Palavras de 32 bits da tarefa idle. */
 #define configTOTAL_HEAP_SIZE           (40 * 1024)
+#define configUSE_TRACE_FACILITY        1
 #define configUSE_IDLE_HOOK             0
 #define configUSE_TICK_HOOK             0
 
