@@ -25,7 +25,8 @@ static struct mqtt_connect_client_info_t info;
 static ip_addr_t broker;
 static char client_id[24], topic[64];
 static bool ready, connecting, inflight, suspended, deferred;
-static uint64_t retry_us, wifi_retry_us, sent_us;
+static uint64_t retry_us, wifi_retry_us, sent_us, connect_started_us;
+static uintptr_t publish_generation, connection_generation;
 static unsigned backoff_s = 1;
 static char sending[TELEMETRY_PAYLOAD];
 #ifdef TREMO_FREERTOS_ENABLED
@@ -36,16 +37,23 @@ static void retry(void) {
     retry_us = time_us_64() + (uint64_t)backoff_s * 1000000;
     if (backoff_s < 32) backoff_s *= 2;
 }
+static void disconnect_client(void) {
+    inflight = connecting = false;
+    ++connection_generation; // Invalida callbacks de uma conexão encerrada.
+    mqtt_disconnect(client);
+}
 static void connection(mqtt_client_t *c, void *arg, mqtt_connection_status_t status) {
-    (void)c; (void)arg; connecting = false;
+    (void)c;
+    if ((uintptr_t)arg != connection_generation) return;
+    connecting = false;
     if (status == MQTT_CONNECT_ACCEPTED) { backoff_s = 1; }
     else { inflight = false; retry(); }
 }
 static void published(void *arg, err_t err) {
-    (void)arg;
+    if (!inflight || (uintptr_t)arg != publish_generation) return;
     if (err == ERR_OK) telemetry_ack(); // PUBACK do broker, não confirmação SQLite.
     inflight = false;
-    if (err != ERR_OK) { mqtt_disconnect(client); connecting = false; retry(); }
+    if (err != ERR_OK) { disconnect_client(); retry(); }
 }
 static void start_network(void) {
     if (!ipaddr_aton(TREMO_MQTT_HOST, &broker) || cyw43_arch_init()) return;
@@ -88,7 +96,7 @@ static communication_status_t read_status(void) {
 static void service_network(communication_mode_t mode) {
     if (!ready) return;
     if (mode == COMM_SUSPENDED) {
-        if (!suspended) { mqtt_disconnect(client); inflight = connecting = false; suspended = true; }
+        if (!suspended) { disconnect_client(); suspended = true; }
         return; // Nenhum poll/IRQ de rede durante testes cognitivos (arquitetura poll).
     }
     if (suspended) { suspended = false; retry_us = 0; }
@@ -101,8 +109,8 @@ static void service_network(communication_mode_t mode) {
     if (deferred) {
         // A conexão pode ter expirado enquanto o poll ficou parado. O evento
         // sem PUBACK continua na fila e será reenviado pela nova conexão.
-        mqtt_disconnect(client);
-        inflight = connecting = deferred = false;
+        disconnect_client();
+        deferred = false;
         retry_us = 0;
     }
     cyw43_arch_poll();
@@ -114,7 +122,7 @@ static void service_network(communication_mode_t mode) {
     int link = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
     if (link != CYW43_LINK_UP) {
         if (now >= wifi_retry_us) {
-            mqtt_disconnect(client); inflight = connecting = false;
+            disconnect_client();
             cyw43_arch_wifi_connect_async(TREMO_WIFI_SSID, TREMO_WIFI_PASSWORD,
                 TREMO_WIFI_PASSWORD[0] ? CYW43_AUTH_WPA2_AES_PSK : CYW43_AUTH_OPEN);
             wifi_retry_us = now + 15000000;
@@ -122,18 +130,35 @@ static void service_network(communication_mode_t mode) {
         return;
     }
     if (!mqtt_client_is_connected(client)) {
+        if (connecting && now - connect_started_us >= 15000000) {
+            disconnect_client();
+            retry();
+            return;
+        }
         if (!connecting && now >= retry_us) {
             connecting = true;
-            if (mqtt_client_connect(client, &broker, TREMO_MQTT_PORT, connection, NULL, &info) != ERR_OK) { connecting = false; retry(); }
+            connect_started_us = now;
+            ++connection_generation;
+            if (mqtt_client_connect(client, &broker, TREMO_MQTT_PORT, connection,
+                                    (void *)connection_generation, &info) != ERR_OK) {
+                disconnect_client();
+                retry();
+            }
         }
         return;
     }
     if (inflight && now - sent_us > 15000000) {
-        mqtt_disconnect(client); inflight = connecting = false; retry(); return;
+        disconnect_client(); retry(); return;
     }
     if (!inflight && telemetry_copy(sending, sizeof(sending))) {
-        inflight = true; sent_us = now;
-        if (mqtt_publish(client, topic, sending, strlen(sending), 1, 0, published, NULL) != ERR_OK) inflight = false;
+        inflight = true;
+        sent_us = now;
+        ++publish_generation;
+        if (mqtt_publish(client, topic, sending, strlen(sending), 1, 0,
+                         published, (void *)publish_generation) != ERR_OK) {
+            disconnect_client();
+            retry();
+        }
     }
 }
 #ifdef TREMO_FREERTOS_ENABLED

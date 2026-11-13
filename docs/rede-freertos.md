@@ -46,3 +46,22 @@ com MPU COG ativado. Desligue o ponto de acesso durante o teste e depois religue
 O teste deve continuar respondendo e a captura deve continuar. O estado de rede
 deve voltar a conectado. Confira intervalos perdidos e descartes ao final.
 Essa validação física e a conexão com o broker real permanecem pendentes.
+
+## Task 12 — Confirmação, pendências e recuperação
+
+As publicações continuam em QoS 1 e sem retain. A mensagem sai da fila apenas
+após PUBACK. Cada tentativa recebe uma geração e o callback confere essa
+identificação. Uma confirmação antiga ou duplicada não remove outra mensagem.
+A conexão também tem identificação para descartar callbacks de conexões antigas.
+
+A espera de conexão ao broker e a espera de PUBACK têm limite de 15 s.
+Falhas imediatas de publicação encerram a conexão e respeitam o backoff de
+1 até 32 s, preservando a mensagem pendente. A conexão aceita reinicia o
+backoff. O receptor desktop elimina duplicatas pela identidade placa/sessão/
+sequência e confirma recepção após gravar no SQLite.
+
+Os testes verificam falha por memória, timeout, PUBACK atrasado/duplicado,
+conexão sem resposta e retorno após queda. Na bancada, interrompa o Mosquitto
+durante uma sessão e restabeleça-o depois. A sessão deve prosseguir e os dados
+ainda presentes na fila devem chegar. Compare os contadores de descartes e
+os registros no SQLite. O buffer é limitado e não persiste após desligar a placa.
