@@ -168,12 +168,13 @@ bool rti_update(control_event_t event, control_button_state_t button, uint64_t n
         if (event == CONTROL_CONFIRM && button.pressed && button.settled) start_wait(button);
         break;
     case RTI_FOREPERIOD:
-        // Verifica soltura ANTES do prazo do estímulo. Debounce pendente adia o alvo.
+        // Só avança o prazo com CONTROL_NONE, que traz o estado atual do botão.
+        // Eventos enfileirados e solturas são tratados primeiro.
         if (event == CONTROL_CONFIRM_RELEASE) {
             current.released = true;
             current.release_us = button.edge_us;
             end_trial(RTI_ANTICIPATION, now_us);
-        } else if (button.pressed && button.settled && now_us - wait_started_us >= current.planned_wait_us) {
+        } else if (event == CONTROL_NONE && button.pressed && button.settled && now_us - wait_started_us >= current.planned_wait_us) {
             present_stimulus();
         }
         break;
@@ -184,7 +185,7 @@ bool rti_update(control_event_t event, control_button_state_t button, uint64_t n
             if (button.edge_us < current.onset_us) end_trial(RTI_ANTICIPATION, now_us);
             else if (button.edge_us - current.onset_us < RTI_RESPONSE_LIMIT_US) end_trial(RTI_RESPONSE, now_us);
             else end_trial(RTI_OMISSION, now_us);
-        } else if (now_us - current.onset_us >= RTI_RESPONSE_LIMIT_US &&
+        } else if (event == CONTROL_NONE && now_us - current.onset_us >= RTI_RESPONSE_LIMIT_US &&
                    (button.settled || now_us - current.onset_us >= RTI_RESPONSE_LIMIT_US + RTI_DEBOUNCE_GRACE_US)) {
             end_trial(RTI_OMISSION, now_us);
         }

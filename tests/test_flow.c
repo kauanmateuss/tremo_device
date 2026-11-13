@@ -70,7 +70,14 @@ static void step(control_event_t e, uint32_t elapsed) {
         button.pressed = e == CONTROL_CONFIRM;
         button.edge_us = (uint64_t)clock_ms * 1000;
     }
+#ifdef TEST_TASK_INPUT
+    control_button_state_t captured = button;
+    button = (control_button_state_t){0}; // A FSM deve usar a cópia recebida.
+    app_update_input(e, captured, time_us_64());
+    button = captured;
+#else
     app_update();
+#endif
 }
 static void finish_calibration(void) {
     assert(app_get_state() == APP_CALIBRATING);

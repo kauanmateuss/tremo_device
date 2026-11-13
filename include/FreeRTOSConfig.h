@@ -13,6 +13,7 @@
 
 /* Esperas do SDK continuam independentes. A aplicação usa vTaskDelay. */
 #define INCLUDE_xTimerPendFunctionCall  1
+#define INCLUDE_xTaskDelayUntil        1
 #define INCLUDE_vTaskDelay             1
 #define configUSE_MUTEXES              1
 #define INCLUDE_vTaskSuspend           1

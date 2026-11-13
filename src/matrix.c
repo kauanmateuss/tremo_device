@@ -1,5 +1,8 @@
 #include "matrix.h"
 #include "ws2818b.pio.h"
+#ifdef TREMO_FREERTOS_ENABLED
+#include "display_task.h"
+#endif
 
 static npLED_t leds[LED_COUNT];
 static PIO np_pio;
@@ -45,10 +48,18 @@ void npClear(void) {
 }
 
 void npWrite(void) {
+#ifdef TREMO_FREERTOS_ENABLED
+  display_task_matrix(leds);
+#else
+  matrix_write_frame(leds);
+#endif
+}
+
+void matrix_write_frame(const npLED_t *pixels) {
   if (sm < 0) return;
   for (uint i = 0; i < LED_COUNT; ++i) {
-    uint32_t grb = ((uint32_t)leds[i].G << 16) |
-                   ((uint32_t)leds[i].R << 8) | leds[i].B;
+    uint32_t grb = ((uint32_t)pixels[i].G << 16) |
+                   ((uint32_t)pixels[i].R << 8) | pixels[i].B;
     pio_sm_put_blocking(np_pio, sm, grb << 8);
   }
   while (!pio_sm_is_tx_fifo_empty(np_pio, sm)) tight_loop_contents();
