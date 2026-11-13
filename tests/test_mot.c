@@ -21,6 +21,7 @@ void display_show_lines(const char *lines[], size_t n) {
 }
 void npClear(void) { lit = 0; }
 void npWrite(void) { clock_us += 1000; }
+uint64_t npWriteTimed(void) { npWrite(); return time_us_64(); }
 void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b) {
     assert(x < 5 && y < 5 && r == 0);
     ++lit;

@@ -37,8 +37,8 @@ void telemetry_emit(uint64_t session_id, uint64_t time_us, const char *type, boo
 void telemetry_start(const session_t *s) {
     current_id = s->id; sequence = dropped = 0;
     telemetry_emit(s->id, s->started_us, "start", true,
-        "{\"kind\":%u,\"duration_ms\":%lu,\"sample_ms\":%u,\"tests_mask\":%u,\"tremor_first\":%s,\"mot_mpu\":%s,\"protocol\":\"tremo-adaptado-v1\"}",
-        s->kind, (unsigned long)s->config.duration_ms, s->config.sample_ms, s->config.tests_mask, s->config.tremor_first ? "true" : "false", s->config.mot_mpu ? "true" : "false");
+        "{\"kind\":%u,\"duration_ms\":%lu,\"sample_ms\":%u,\"tests_mask\":%u,\"tremor_first\":%s,\"cognitive_mpu\":%s,\"protocol\":\"tremo-adaptado-v1\"}",
+        s->kind, (unsigned long)s->config.duration_ms, s->config.sample_ms, s->config.tests_mask, s->config.tremor_first ? "true" : "false", s->config.cognitive_mpu ? "true" : "false");
 }
 void telemetry_state(const session_t *s, uint64_t now_us, bool terminal) {
     telemetry_emit(s->id, now_us, terminal ? "end" : "state", true,

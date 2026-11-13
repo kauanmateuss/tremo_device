@@ -15,6 +15,7 @@ bool stdio_usb_connected(void) { return usb; }
 uint32_t get_rand_32(void) { random_state = random_state * 1664525u + 1013904223u; return random_state; }
 void npClear(void) { shape = corners = whites = 0; }
 void npWrite(void) { clock_us += 1000; }
+uint64_t npWriteTimed(void) { npWrite(); return time_us_64(); }
 void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b) {
     assert(x <= 4 && y <= 4);
     if (x >= 1 && x <= 3 && y >= 1 && y <= 3) {
@@ -179,6 +180,18 @@ int main(void) {
         assert(pal_result()->record_count == 11 && pal_result()->correct == 9);
         assert(pal_result()->rounds_started == 3 && pal_get_state() == PAL_RESULTS);
     }
+    total_shapes = 0; pal_begin(); step(CONTROL_CONFIRM, 0); encode(2, false);
+    uint64_t onset = clock_us;
+    assert(!pal_update_captured(CONTROL_RIGHT, onset - 1, clock_us));
+    assert(whites == 1);
+    uint8_t position = known_positions[known_index(2)];
+    if (position & 1) step(CONTROL_RIGHT, 1000);
+    if (position & 2) step(CONTROL_DOWN, 1000);
+    uint64_t captured = clock_us + 100000;
+    clock_us = onset + PAL_TIMEOUT_US + 100000;
+    assert(!pal_update_captured(CONTROL_CONFIRM, captured, clock_us));
+    assert(pal_result()->records[0].outcome == PAL_CORRECT);
+    assert(pal_result()->records[0].elapsed_us == captured - onset);
     puts("PASS PAL: associacoes, niveis, treino, repeticoes, limite, omissoes e interrupcao");
     return 0;
 }

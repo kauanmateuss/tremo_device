@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include "mpu_task.h"
 #include "mot.h"
+#include "prm.h"
+#include "pal.h"
 #include "matrix.h"
 #include "monitoring.h"
 #include "mpu6050_i2c.h"
@@ -15,6 +17,7 @@
 static session_t session = {.id = 42, .config = {.sample_ms = 20, .duration_ms = 500}};
 static bool failed, transmit;
 static TaskHandle_t consumer_handle;
+uint32_t get_rand_32(void) { return 1234; }
 uint64_t time_us_64(void) { return (uint64_t)xTaskGetTickCount() * 1000; }
 absolute_time_t get_absolute_time(void) { return time_us_64(); }
 uint32_t to_ms_since_boot(absolute_time_t value) { return value / 1000; }
@@ -39,6 +42,7 @@ void display_show_lines(const char *lines[], size_t count) {
 }
 void npClear(void) {}
 void npWrite(void) { vTaskDelay(1); }
+uint64_t npWriteTimed(void) { npWrite(); return time_us_64(); }
 void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b) {
     (void)x; (void)y; (void)r; (void)g; (void)b;
 }
@@ -125,6 +129,24 @@ static void consumer(void *parameter) {
     vTaskDelay(40);
     assert(monitoring_result()->valid[0] > before);
     monitoring_stop(now_ms(), MONITORING_COMPLETE);
+
+    monitoring_start_continuous(now_ms());
+    prm_begin();
+    assert(!prm_update(CONTROL_CONFIRM, time_us_64()));
+    before = monitoring_result()->valid[0];
+    vTaskDelay(40);
+    assert(monitoring_result()->valid[0] > before && prm_get_state() == PRM_ENCODING);
+    assert(!prm_update(CONTROL_BACK, time_us_64()));
+    monitoring_stop(now_ms(), MONITORING_INTERRUPTED);
+
+    monitoring_start_continuous(now_ms());
+    pal_begin();
+    assert(!pal_update(CONTROL_CONFIRM, time_us_64()));
+    before = monitoring_result()->valid[0];
+    vTaskDelay(40);
+    assert(monitoring_result()->valid[0] > before && pal_get_state() == PAL_ENCODING);
+    assert(!pal_update(CONTROL_BACK, time_us_64()));
+    monitoring_stop(now_ms(), MONITORING_INTERRUPTED);
 
     session.config.duration_ms = 500;
     monitoring_start(now_ms());

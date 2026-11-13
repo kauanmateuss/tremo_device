@@ -15,6 +15,7 @@ bool stdio_usb_connected(void) { return usb; }
 uint32_t get_rand_32(void) { random_state = random_state * 1664525u + 1013904223u; return random_state; }
 void npClear(void) { pixels = 0; }
 void npWrite(void) { clock_us += 1000; }
+uint64_t npWriteTimed(void) { npWrite(); return time_us_64(); }
 void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b) {
     assert(x >= 1 && x <= 3 && y >= 1 && y <= 3 && !r && g == 20 && !b);
     pixels |= 1u << (y * 5 + x);
@@ -125,6 +126,17 @@ int main(void) {
         for (unsigned i = 0; i < 6; ++i) choose(i, 6, false);
         assert(prm_result()->record_count == PRM_MAX_RECORDS && prm_result()->correct == 6);
     }
+    prm_begin(); step(CONTROL_CONFIRM, 0); encode(2);
+    uint64_t onset = clock_us;
+    assert(!prm_update_captured(CONTROL_RIGHT, onset - 1, clock_us));
+    assert(strcmp(screen[2], "OPCAO 1") == 0);
+    step(CONTROL_RIGHT, 1000);
+    if (pixels != sample[1]) step(CONTROL_LEFT, 1000);
+    uint64_t captured = clock_us + 100000;
+    clock_us = onset + PRM_TIMEOUT_US + 100000;
+    assert(!prm_update_captured(CONTROL_CONFIRM, captured, clock_us));
+    assert(prm_result()->records[0].outcome == PRM_CORRECT);
+    assert(prm_result()->records[0].elapsed_us == captured - onset);
     puts("PASS PRM: banco, memorizacao, alternativas, treino, prazos, resultados e interrupcao");
     return 0;
 }

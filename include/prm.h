@@ -37,6 +37,8 @@ typedef struct {
 // Requer OLED/matriz inicializados. Tempos medem escolha incluindo navegação.
 void prm_begin(void);
 bool prm_update(control_event_t event, uint64_t event_us);
+// Captura da entrada separada do relógio usado para avançar memorização/intervalos.
+bool prm_update_captured(control_event_t event, uint64_t event_us, uint64_t now_us);
 void prm_serial_update(void);
 prm_state_t prm_get_state(void);
 const prm_result_t *prm_result(void);

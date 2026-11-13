@@ -22,7 +22,9 @@ static app_state_t state;
 static unsigned int menu_option, cognitive_option, config_option;
 static uint32_t welcome_started_ms, last_display_ms;
 static bool matrix_ready;
-static bool preparing_mot, capturing_mot;
+static int preparing_test = -1;
+static bool capturing_cognitive;
+static const app_state_t cognitive_states[] = {APP_MOT, APP_RTI, APP_PRM, APP_PAL};
 static communication_status_t ready_network;
 
 static void draw_ready(void) {
@@ -32,8 +34,9 @@ static void draw_ready(void) {
         [COMM_WIFI_NO_IP] = "WIFI SEM IP", [COMM_BROKER_WAIT] = "AGUARDE MQTT",
         [COMM_ONLINE] = "MQTT CONECTADO"
     };
+    const char *titles[] = {"MOT + MPU", "RTI + MPU", "PRM + MPU", "PAL + MPU"};
     ready_network = communication_status();
-    const char *lines[] = {preparing_mot ? "MOT + MPU" : "SENSORES OK", "PRONTO", labels[ready_network],
+    const char *lines[] = {preparing_test >= 0 ? titles[preparing_test] : "SENSORES OK", "PRONTO", labels[ready_network],
                            "", "A INICIAR", "B VOLTAR"};
     display_show_lines(lines, 6);
 }
@@ -81,7 +84,7 @@ static void show_config(void) {
     const char *names[] = {"MOT", "RTI", "PRM", "PAL"};
     for (unsigned i = 0; i < 4; ++i) snprintf(rows[i + 2], sizeof(rows[0]), "%s %s", names[i], c->tests_mask & (1u << i) ? "SIM" : "NAO");
     snprintf(rows[6], sizeof(rows[6]), "MPU %s", c->tremor_first ? "ANTES" : "DEPOIS");
-    snprintf(rows[7], sizeof(rows[7]), "MPU MOT %s", c->mot_mpu ? "SIM" : "NAO");
+    snprintf(rows[7], sizeof(rows[7]), "MPU COG %s", c->cognitive_mpu ? "SIM" : "NAO");
     // Janela de três opções mantém instruções visíveis no OLED.
     const char *lines[] = {"CONFIGURACOES", rows[config_option], rows[(config_option + 1) % 8], rows[(config_option + 2) % 8], "ALTERA PRIMEIRA", "A ALTERAR", "B MENU", "CLIQUE PAUSA"};
     display_show_lines(lines, 8);
@@ -104,6 +107,16 @@ static void show_evaluation_results(void) {
         for (unsigned i = 0; i < e->count; ++i) printf("# STEP module=%u status=%u correct=%lu wrong=%lu omissions=%lu\n",
             e->steps[i].module, e->steps[i].status, (unsigned long)e->steps[i].correct,
             (unsigned long)e->steps[i].wrong, (unsigned long)e->steps[i].omissions);
+    }
+}
+
+static void begin_cognitive(unsigned test) {
+    const session_kind_t kinds[] = {SESSION_MOT, SESSION_RTI, SESSION_PRM, SESSION_PAL};
+    if (!evaluation_current()->active) session_begin(kinds[test], time_us_64());
+    assessment_begin(test);
+    if (session_current()->config.cognitive_mpu) {
+        monitoring_start_continuous(now_ms());
+        capturing_cognitive = true;
     }
 }
 
@@ -169,26 +182,10 @@ static void enter_state(app_state_t next) {
     case APP_COG_MENU:
         show_cognitive_menu();
         break;
-    case APP_MOT:
-        if (!evaluation_current()->active) session_begin(SESSION_MOT, time_us_64());
-        assessment_begin(0);
-        if (session_current()->config.mot_mpu) {
-            monitoring_start_continuous(now_ms());
-            capturing_mot = true;
-        }
-        break;
-    case APP_RTI:
-        if (!evaluation_current()->active) session_begin(SESSION_RTI, time_us_64());
-        assessment_begin(1);
-        break;
-    case APP_PRM:
-        if (!evaluation_current()->active) session_begin(SESSION_PRM, time_us_64());
-        assessment_begin(2);
-        break;
-    case APP_PAL:
-        if (!evaluation_current()->active) session_begin(SESSION_PAL, time_us_64());
-        assessment_begin(3);
-        break;
+    case APP_MOT: begin_cognitive(0); break;
+    case APP_RTI: begin_cognitive(1); break;
+    case APP_PRM: begin_cognitive(2); break;
+    case APP_PAL: begin_cognitive(3); break;
     case APP_COG_UNAVAILABLE: {
         const char *names[] = {"MOT", "RTI", "PRM", "PAL", "BATERIA"};
         const char *lines[] = {names[cognitive_option], "EM BREVE", "", "B VOLTAR"};
@@ -232,21 +229,21 @@ static void finish_session(monitoring_end_t reason) {
 }
 
 static void evaluation_end(session_state_t reason) {
-    preparing_mot = false;
+    preparing_test = -1;
     if (reason != SESSION_COMPLETE) evaluation_cancel(reason == SESSION_ERROR);
     session_finish(reason, time_us_64());
     enter_state(APP_EVAL_RESULTS);
 }
-static void launch_mot(void) {
-    if (session_config()->mot_mpu) {
-        preparing_mot = true;
+static void launch_cognitive(unsigned test) {
+    if (session_config()->cognitive_mpu) {
+        preparing_test = (int)test;
         enter_state(APP_PREPARING);
-    } else enter_state(APP_MOT);
+    } else enter_state(cognitive_states[test]);
 }
 
 static void leave_preparation(void) {
-    if (preparing_mot) {
-        preparing_mot = false;
+    if (preparing_test >= 0) {
+        preparing_test = -1;
         if (evaluation_current()->active) evaluation_end(SESSION_INTERRUPTED);
         else enter_state(APP_COG_MENU);
     } else enter_state(APP_INSTRUCTIONS);
@@ -256,11 +253,7 @@ static void launch_step(void) {
     evaluation_start_step();
     unsigned module = evaluation_current()->steps[evaluation_current()->index].module;
     if (module == EVALUATION_TREMOR) enter_state(APP_INSTRUCTIONS);
-    else if (module == 0) launch_mot();
-    else {
-        const app_state_t states[] = {APP_MOT, APP_RTI, APP_PRM, APP_PAL};
-        enter_state(states[module]);
-    }
+    else launch_cognitive(module);
 }
 static void launch_evaluation(bool full) {
     if (!matrix_ready) { enter_state(APP_MOT_ERROR); return; }
@@ -274,15 +267,16 @@ static void evaluation_continue(control_event_t event) {
         else evaluation_end(SESSION_COMPLETE);
     }
 }
-static void record_cognitive_step(void) {
+static void record_cognitive_step(bool sensor_error) {
     unsigned module = evaluation_current()->steps[evaluation_current()->index].module;
     switch (module) {
-    case 0: evaluation_record(assessment_interrupted() ? STEP_INTERRUPTED : STEP_COMPLETE, mot_result()->correct, mot_result()->wrong, mot_result()->omissions); break;
-    case 1: evaluation_record(assessment_interrupted() ? STEP_INTERRUPTED : STEP_COMPLETE, rti_result()->responses, rti_result()->anticipations, rti_result()->omissions); break;
-    case 2: evaluation_record(assessment_interrupted() ? STEP_INTERRUPTED : STEP_COMPLETE, prm_result()->correct, prm_result()->wrong, prm_result()->omissions); break;
-    case 3: evaluation_record(assessment_interrupted() ? STEP_INTERRUPTED : pal_result()->limit_reached ? STEP_LIMIT : STEP_COMPLETE, pal_result()->correct, pal_result()->wrong, pal_result()->omissions); break;
+    case 0: evaluation_record(sensor_error ? STEP_ERROR : assessment_interrupted() ? STEP_INTERRUPTED : STEP_COMPLETE, mot_result()->correct, mot_result()->wrong, mot_result()->omissions); break;
+    case 1: evaluation_record(sensor_error ? STEP_ERROR : assessment_interrupted() ? STEP_INTERRUPTED : STEP_COMPLETE, rti_result()->responses, rti_result()->anticipations, rti_result()->omissions); break;
+    case 2: evaluation_record(sensor_error ? STEP_ERROR : assessment_interrupted() ? STEP_INTERRUPTED : STEP_COMPLETE, prm_result()->correct, prm_result()->wrong, prm_result()->omissions); break;
+    case 3: evaluation_record(sensor_error ? STEP_ERROR : assessment_interrupted() ? STEP_INTERRUPTED : pal_result()->limit_reached ? STEP_LIMIT : STEP_COMPLETE, pal_result()->correct, pal_result()->wrong, pal_result()->omissions); break;
     }
-    if (assessment_interrupted()) evaluation_end(SESSION_INTERRUPTED);
+    if (sensor_error) evaluation_end(SESSION_ERROR);
+    else if (assessment_interrupted()) evaluation_end(SESSION_INTERRUPTED);
     else { display_draw_text("A PROX B FIM   ", 5, 56); display_render(); }
 }
 
@@ -296,17 +290,17 @@ void app_init(void) {
     monitoring_init();
     monitoring_prepare(); // Ausência de sensor não impede acessar o menu.
     menu_option = cognitive_option = config_option = 0;
-    preparing_mot = capturing_mot = false;
+    preparing_test = -1;
+    capturing_cognitive = false;
     enter_state(APP_WELCOME);
 }
 
-static void report_mot_sensor_error(void) {
+static void report_cognitive_sensor_error(void) {
     if (evaluation_current()->active) {
-        evaluation_record(STEP_ERROR, mot_result()->correct, mot_result()->wrong, mot_result()->omissions);
-        evaluation_end(SESSION_ERROR);
+        record_cognitive_step(true);
     } else {
         session_finish(SESSION_ERROR, time_us_64());
-        const char *lines[] = {"FALHA MPU", "MOT ENCERRADO", "", "VER SERIAL USB", "A OU B VOLTAR"};
+        const char *lines[] = {"FALHA MPU", "TESTE ENCERRADO", "", "VER SERIAL USB", "A OU B VOLTAR"};
         display_show_lines(lines, 5);
     }
 }
@@ -314,29 +308,29 @@ static void report_mot_sensor_error(void) {
 static void app_step(control_event_t event, control_button_state_t button, uint64_t event_us, uint64_t processing_us) {
     uint32_t now = now_ms();
     if (state == APP_MOT || state == APP_RTI || state == APP_PRM || state == APP_PAL) {
-        if (state == APP_MOT && session_current()->config.mot_mpu)
+        if (session_current()->config.cognitive_mpu)
             monitoring_serial_update();
-        if (capturing_mot) {
+        if (capturing_cognitive) {
             if (!monitoring_update(now_ms())) {
                 assessment_update(CONTROL_BACK, button, event_us, processing_us);
                 monitoring_stop(now_ms(), MONITORING_SENSOR_ERROR);
-                capturing_mot = false;
-                report_mot_sensor_error();
+                capturing_cognitive = false;
+                report_cognitive_sensor_error();
                 return;
             }
         }
         if (evaluation_current()->active && assessment_finished()) { assessment_update(CONTROL_NONE, button, event_us, processing_us); evaluation_continue(event); return; }
         bool leave = assessment_update(event, button, event_us, processing_us);
         if (assessment_finished()) {
-            if (capturing_mot) {
+            if (capturing_cognitive) {
                 monitoring_stop(now_ms(), assessment_interrupted() ? MONITORING_INTERRUPTED : MONITORING_COMPLETE);
-                capturing_mot = false;
+                capturing_cognitive = false;
                 if (monitoring_result()->reason == MONITORING_SENSOR_ERROR) {
-                    report_mot_sensor_error();
+                    report_cognitive_sensor_error();
                     return;
                 }
             }
-            if (evaluation_current()->active) record_cognitive_step();
+            if (evaluation_current()->active) record_cognitive_step(false);
             else session_finish(assessment_interrupted() ? SESSION_INTERRUPTED : SESSION_COMPLETE, time_us_64());
         }
         if (leave) enter_state(APP_COG_MENU);
@@ -392,9 +386,10 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
     case APP_READY:
         if (ready_network != communication_status()) draw_ready();
         if (event == CONTROL_BACK) leave_preparation();
-        else if (event == CONTROL_CONFIRM && preparing_mot) {
-            preparing_mot = false;
-            enter_state(APP_MOT);
+        else if (event == CONTROL_CONFIRM && preparing_test >= 0) {
+            unsigned test = (unsigned)preparing_test;
+            preparing_test = -1;
+            enter_state(cognitive_states[test]);
         } else if (event == CONTROL_CONFIRM) {
             if (!evaluation_current()->active) session_begin(SESSION_TREMOR, time_us_64());
             monitoring_start(now_ms());
@@ -448,13 +443,11 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         else if (event == CONTROL_UP) { cognitive_option = (cognitive_option + 4) % 5; show_cognitive_menu(); }
         else if (event == CONTROL_DOWN) { cognitive_option = (cognitive_option + 1) % 5; show_cognitive_menu(); }
         else if (event == CONTROL_CONFIRM) {
-            if (cognitive_option == 0) {
-                if (matrix_ready) launch_mot();
-                else enter_state(APP_MOT_ERROR);
+            if (cognitive_option < 4) {
+                const app_state_t errors[] = {APP_MOT_ERROR, APP_RTI_ERROR, APP_PRM_ERROR, APP_PAL_ERROR};
+                if (matrix_ready) launch_cognitive(cognitive_option);
+                else enter_state(errors[cognitive_option]);
             }
-            else if (cognitive_option == 1) enter_state(matrix_ready ? APP_RTI : APP_RTI_ERROR);
-            else if (cognitive_option == 2) enter_state(matrix_ready ? APP_PRM : APP_PRM_ERROR);
-            else if (cognitive_option == 3) enter_state(matrix_ready ? APP_PAL : APP_PAL_ERROR);
             else launch_evaluation(false);
         }
         break;
@@ -478,7 +471,7 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
             else if (config_option == 1) c.sample_ms = c.sample_ms == 40 ? 20 : 40;
             else if (config_option < 6) c.tests_mask ^= 1u << (config_option - 2);
             else if (config_option == 6) c.tremor_first = !c.tremor_first;
-            else c.mot_mpu = !c.mot_mpu;
+            else c.cognitive_mpu = !c.cognitive_mpu;
             session_configure(c); show_config();
         } else if (event == CONTROL_BACK) enter_state(APP_MENU);
         break;
@@ -506,7 +499,7 @@ void app_update_captured(control_event_t event, control_button_state_t button,
     app_step(event, button, event_us, now_us);
     bool cognitive = state == APP_MOT || state == APP_RTI || state == APP_PRM || state == APP_PAL;
     communication_mode_t mode = COMM_NORMAL;
-    if (cognitive && !assessment_finished()) mode = capturing_mot ? COMM_STREAM_ONLY : COMM_SUSPENDED;
+    if (cognitive && !assessment_finished()) mode = capturing_cognitive ? COMM_STREAM_ONLY : COMM_SUSPENDED;
     else if (state == APP_CALIBRATING || state == APP_ACQUIRING || state == APP_STOP_CONFIRM)
         mode = COMM_STREAM_ONLY;
     communication_update(mode);
