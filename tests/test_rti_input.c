@@ -20,6 +20,7 @@ void adc_select_input(uint input) { (void)input; }
 uint16_t adc_read(void) { return 2048; }
 void npClear(void) { lit = false; }
 void npWrite(void) { clock_us += 1000; }
+uint64_t npWriteTimed(void) { npWrite(); return time_us_64(); }
 void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b) {
     (void)x; (void)y; (void)r; (void)g; (void)b; lit = true;
 }

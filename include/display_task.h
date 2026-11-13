@@ -10,6 +10,6 @@ bool display_task_init(void);
 // O buffer permanece válido e estável durante toda a chamada.
 bool display_task_render(uint8_t *buffer, struct render_area *area);
 
-void display_task_matrix(const npLED_t *pixels);
+uint64_t display_task_matrix(const npLED_t *pixels);
 
 #endif

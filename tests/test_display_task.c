@@ -18,12 +18,13 @@ bool render_on_display(uint8_t *buffer, struct render_area *area) {
     return expected % 2 == 0;
 }
 
-void matrix_write_frame(const npLED_t *pixels) {
+uint64_t matrix_write_frame(const npLED_t *pixels) {
     assert(xTaskGetCurrentTaskHandle() != client_a);
     assert(xTaskGetCurrentTaskHandle() != client_b);
     uint8_t expected = pixels[0].R;
     vTaskDelay(1);
     assert(pixels[0].R == expected);
+    return (uint64_t)expected + 1000;
 }
 
 void rtos_assert_failed(const char *file, int line) {
@@ -42,7 +43,7 @@ static void client(void *parameter) {
         struct render_area area = {.buffer_length = value};
         assert(display_task_render(&value, &area) == (value % 2 == 0));
         npLED_t pixels[LED_COUNT] = {{.R = value}};
-        display_task_matrix(pixels);
+        assert(display_task_matrix(pixels) == (uint64_t)value + 1000);
     }
     taskENTER_CRITICAL();
     if (++completed == 2) {

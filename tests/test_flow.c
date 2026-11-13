@@ -29,6 +29,7 @@ void display_restore_screen(void) { memcpy(screen, saved_screen, sizeof(screen))
 uint64_t time_us_64(void) { return (uint64_t)clock_ms * 1000; }
 void npClear(void) {}
 void npWrite(void) {}
+uint64_t npWriteTimed(void) { npWrite(); return time_us_64(); }
 void npSetPixel(uint x, uint y, uint8_t r, uint8_t g, uint8_t b) { (void)x; (void)y; (void)r; (void)g; (void)b; }
 void stdio_init_all(void) {}
 bool stdio_usb_connected(void) { return usb; }

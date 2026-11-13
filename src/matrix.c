@@ -47,16 +47,18 @@ void npClear(void) {
   for (uint i = 0; i < LED_COUNT; ++i) npSetLED(i, 0, 0, 0);
 }
 
-void npWrite(void) {
+void npWrite(void) { (void)npWriteTimed(); }
+
+uint64_t npWriteTimed(void) {
 #ifdef TREMO_FREERTOS_ENABLED
-  display_task_matrix(leds);
+  return display_task_matrix(leds);
 #else
-  matrix_write_frame(leds);
+  return matrix_write_frame(leds);
 #endif
 }
 
-void matrix_write_frame(const npLED_t *pixels) {
-  if (sm < 0) return;
+uint64_t matrix_write_frame(const npLED_t *pixels) {
+  if (sm < 0) return time_us_64();
   for (uint i = 0; i < LED_COUNT; ++i) {
     uint32_t grb = ((uint32_t)pixels[i].G << 16) |
                    ((uint32_t)pixels[i].R << 8) | pixels[i].B;
@@ -65,4 +67,5 @@ void matrix_write_frame(const npLED_t *pixels) {
   while (!pio_sm_is_tx_fifo_empty(np_pio, sm)) tight_loop_contents();
   // Permite terminar o último pixel (30 us) e manter o intervalo de reset.
   sleep_us(150);
+  return time_us_64();
 }

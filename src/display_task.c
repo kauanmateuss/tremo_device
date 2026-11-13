@@ -13,6 +13,7 @@ typedef struct {
     struct render_area *area;
     TaskHandle_t caller;
     bool *success;
+    uint64_t *completed_us;
 } display_request_t;
 
 static QueueHandle_t requests;
@@ -26,7 +27,7 @@ static void task_display(void *parameter) {
             if (request.target == DISPLAY_OLED) {
                 *request.success = render_on_display(request.buffer, request.area);
             } else {
-                matrix_write_frame(request.pixels);
+                *request.completed_us = matrix_write_frame(request.pixels);
                 *request.success = true;
             }
             xTaskNotifyGive(request.caller);
@@ -59,6 +60,10 @@ bool display_task_render(uint8_t *buffer, struct render_area *area) {
     });
 }
 
-void display_task_matrix(const npLED_t *pixels) {
-    transfer((display_request_t){.target = DISPLAY_MATRIX, .pixels = pixels});
+uint64_t display_task_matrix(const npLED_t *pixels) {
+    uint64_t completed_us = 0;
+    transfer((display_request_t){
+        .target = DISPLAY_MATRIX, .pixels = pixels, .completed_us = &completed_us
+    });
+    return completed_us;
 }
