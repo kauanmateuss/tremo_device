@@ -42,6 +42,7 @@ add_subdirectory("${FREERTOS_KERNEL_PATH}/portable/ThirdParty/GCC/RP2040" freert
 
 add_executable(tremo_device main.c
             src/rtos_hooks.c
+            src/display_task.c
             src/matrix.c
             src/ssd1306_i2c.c
             src/display.c
@@ -71,7 +72,7 @@ pico_generate_pio_header(tremo_device ${CMAKE_CURRENT_LIST_DIR}/ws2818b.pio)
 pico_enable_stdio_uart(tremo_device 0)
 pico_enable_stdio_usb(tremo_device 1)
 # Limita a espera por um monitor USB lento durante a navegação.
-target_compile_definitions(tremo_device PRIVATE PICO_STDIO_USB_STDOUT_TIMEOUT_US=1000)
+target_compile_definitions(tremo_device PRIVATE PICO_STDIO_USB_STDOUT_TIMEOUT_US=1000 TREMO_FREERTOS_ENABLED=1)
 
 # Add the standard library to the build
 target_link_libraries(tremo_device

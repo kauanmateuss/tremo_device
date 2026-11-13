@@ -3,6 +3,9 @@
 #include "display.h"
 #include <string.h>
 #include <stdio.h>
+#ifdef TREMO_FREERTOS_ENABLED
+#include "display_task.h"
+#endif
 
 static uint8_t ssd[ssd1306_buffer_length], saved_screen[ssd1306_buffer_length];
 static struct render_area frame_area;
@@ -73,7 +76,11 @@ void clear_display(void) {
 void display_render(void) {
     static bool reported_error;
     if (!initialized) return;
+#ifdef TREMO_FREERTOS_ENABLED
+    bool ok = display_task_render(ssd, &frame_area);
+#else
     bool ok = render_on_display(ssd, &frame_area);
+#endif
     if (!ok && !reported_error && stdio_usb_connected()) {
         puts("# OLED: falha I2C ao atualizar a tela");
         reported_error = true;

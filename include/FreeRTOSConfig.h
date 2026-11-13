@@ -7,13 +7,15 @@
 #define configTICK_TYPE_WIDTH_IN_BITS   TICK_TYPE_WIDTH_32_BITS
 #define configMAX_PRIORITIES            5
 #define configMINIMAL_STACK_SIZE        256  /* Palavras de 32 bits da tarefa idle. */
-#define configTOTAL_HEAP_SIZE           (16 * 1024)
+#define configTOTAL_HEAP_SIZE           (24 * 1024)
 #define configUSE_IDLE_HOOK             0
 #define configUSE_TICK_HOOK             0
 
 /* Esperas do SDK continuam independentes. A aplicação usa vTaskDelay. */
 #define INCLUDE_xTimerPendFunctionCall  1
 #define INCLUDE_vTaskDelay             1
+#define configUSE_MUTEXES              1
+#define INCLUDE_vTaskSuspend           1
 #define configUSE_TIMERS               1
 #define configTIMER_TASK_PRIORITY      3
 #define configTIMER_QUEUE_LENGTH       8
