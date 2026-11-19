@@ -2,9 +2,21 @@
 #include <stdio.h>
 #include <string.h>
 #include "communication.h"
+#include "patient_assoc.h"
 #include "telemetry.h"
 #include "lwip/apps/mqtt.h"
 #include "pico/cyw43_arch.h"
+static mqtt_incoming_publish_cb_t incoming_topic;
+static mqtt_incoming_data_cb_t incoming_data;
+static char confirmation[192];
+static void send_command(const char *action, const char *patient) {
+    char json[192];
+    int len = snprintf(json, sizeof(json),
+        "{\"v\":2,\"device\":\"abcdef0123456789\",\"command\":\"%s\",\"data\":{\"patient_id\":\"%s\"}}", action, patient);
+    incoming_topic(NULL, "tremo/v1/devices/abcdef0123456789/commands", len);
+    incoming_data(NULL, (const uint8_t *)json, 9, 0);
+    incoming_data(NULL, (const uint8_t *)json + 9, len - 9, MQTT_DATA_FLAG_LAST);
+}
 static uint64_t now;
 static mqtt_client_t network;
 static mqtt_connection_cb_t connect_cb;
@@ -32,7 +44,14 @@ err_t mqtt_client_connect(mqtt_client_t *c, const ip_addr_t *ip, uint16_t port, 
     connect_cb = cb; connect_arg = arg; ++connects; return ERR_OK;
 }
 err_t mqtt_publish(mqtt_client_t *c, const char *topic, const void *payload, uint16_t len, uint8_t qos, uint8_t retain, mqtt_request_cb_t cb, void *arg) {
-    (void)c; (void)arg; assert(qos == 1 && retain == 0);
+    (void)c; (void)arg;
+    if (strstr(topic, "/confirmations")) {
+        assert(!cb && qos == 1 && len < sizeof(confirmation));
+        memcpy(confirmation, payload, len);
+        confirmation[len] = 0;
+        return ERR_OK;
+    }
+    assert(qos == 1 && retain == 0);
     assert(!strcmp(topic, "tremo/v1/devices/abcdef0123456789/events"));
     assert(len == strlen(payload)); strcpy(previous, payload);
     ++publishes; if (!publish_error) { publish_cb = cb; publish_arg = arg; } return publish_error;
@@ -44,6 +63,18 @@ int main(void) {
     communication_update(COMM_NORMAL); assert(publishes == 1 && telemetry_pending() == 1);
     assert(strstr(previous, "abcdef0123456789"));
     communication_update(COMM_NORMAL); assert(publishes == 1); // Aguarda PUBACK.
+    char patient[PATIENT_ID_MAX + 1];
+    send_command("associate_patient", "PAC-1");
+    patient_assoc_copy(patient);
+    assert(!strcmp(patient, "PAC-1") && strstr(confirmation, "association_confirmed"));
+    send_command("associate_patient", "PAC-2");
+    send_command("disassociate_patient", "PAC-1");
+    patient_assoc_copy(patient);
+    assert(!strcmp(patient, "PAC-2") && strstr(confirmation, "error"));
+    send_command("disassociate_patient", "PAC-2");
+    patient_assoc_copy(patient);
+    assert(!patient[0] && strstr(confirmation, "disassociation_confirmed"));
+    assert(telemetry_pending() == 1);
     unsigned before = polls;
     communication_update(COMM_SUSPENDED); communication_update(COMM_SUSPENDED);
     assert(polls == before && disconnects == 1 && telemetry_pending() == 1);
@@ -53,6 +84,9 @@ int main(void) {
     void *stale_arg = publish_arg;
     publish_cb(publish_arg, ERR_OK); assert(telemetry_pending() == 0);
     session_finish(SESSION_COMPLETE, 1); publish_error = ERR_MEM;
+    communication_update(COMM_NORMAL);
+    assert(network.connected && telemetry_pending() == 1);
+    publish_error = ERR_TIMEOUT;
     communication_update(COMM_NORMAL); assert(telemetry_pending() == 1);
     publish_error = ERR_OK;
     before = connects;
@@ -103,4 +137,13 @@ int main(void) {
     assert(!telemetry_pending());
     puts("PASS MQTT: ID, QoS, PUBACK, pausa, reenvio, memoria, timeout e reconexao");
     return 0;
+}
+
+void mqtt_set_inpub_callback(mqtt_client_t *c, mqtt_incoming_publish_cb_t topic_cb, mqtt_incoming_data_cb_t data_cb, void *arg) {
+    (void)c; (void)arg; incoming_topic = topic_cb; incoming_data = data_cb;
+}
+err_t mqtt_subscribe(mqtt_client_t *c, const char *topic, uint8_t qos, mqtt_request_cb_t cb, void *arg) {
+    (void)c; cb(arg, ERR_OK);
+    assert(strstr(topic, "/abcdef0123456789/commands") && qos == 1);
+    return ERR_OK;
 }

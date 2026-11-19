@@ -20,7 +20,8 @@
 #define TCP_SND_BUF (4 * TCP_MSS)
 #define TCP_SND_QUEUELEN 32
 #define MQTT_OUTPUT_RINGBUF_SIZE 2048
-#define MQTT_REQ_MAX_IN_FLIGHT 1
+// Telemetria, confirmação de comando e anúncio retido usam PUBACK independentes.
+#define MQTT_REQ_MAX_IN_FLIGHT 4
 // O único cliente MQTT agenda um timer periódico além dos timers internos do lwIP.
 #define MEMP_NUM_SYS_TIMEOUT (LWIP_NUM_SYS_TIMEOUT_INTERNAL + 1)
 #define LWIP_STATS 0

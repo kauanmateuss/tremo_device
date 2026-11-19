@@ -15,6 +15,7 @@
 #include "communication.h"
 #include "evaluation.h"
 #include "patient_assoc.h"
+#include "telemetry.h"
 
 #define WELCOME_MS 2000
 #define DISPLAY_MS 200
@@ -24,7 +25,17 @@ static unsigned int menu_option, cognitive_option, config_option;
 static uint32_t welcome_started_ms, last_display_ms;
 static bool matrix_ready;
 static int preparing_test = -1;
-static bool capturing_cognitive;
+static bool capturing_cognitive, manual_session, counted_test, full_evaluation;
+static unsigned test_count;
+static bool begin_session(session_kind_t kind) {
+    char patient[PATIENT_ID_MAX + 1];
+    patient_assoc_copy(patient);
+    return session_begin_patient(kind, time_us_64(), patient);
+}
+static void finish_automatic(session_state_t reason) {
+    if (!manual_session) session_finish(reason, time_us_64());
+    else if (session_current()->state == SESSION_PAUSED) session_resume(time_us_64());
+}
 static const app_state_t cognitive_states[] = {APP_MOT, APP_RTI, APP_PRM, APP_PAL};
 static communication_status_t ready_network;
 static char device_id_str[17];
@@ -57,10 +68,10 @@ static void show_menu(void) {
 }
 
 static void show_cognitive_menu(void) {
-    const char *options[] = {"1 MOT", "2 RTI", "3 PRM", "4 PAL", "5 BATERIA"};
-    char rows[5][16];
-    const char *lines[] = {"AVAL COGNITIVA", "", rows[0], rows[1], rows[2], rows[3], rows[4], "A OK B VOLTAR"};
-    for (unsigned int i = 0; i < 5; ++i)
+    const char *options[] = {"MOT", "RTI", "PRM", "PAL", "BATERIA", "TREMORES"};
+    char rows[6][16];
+    const char *lines[] = {"AVAL INDIVIDUAL", rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], "A OK B VOLTAR"};
+    for (unsigned int i = 0; i < 6; ++i)
         snprintf(rows[i], sizeof(rows[i]), "%c%s", cognitive_option == i ? '-' : ' ', options[i]);
     display_show_lines(lines, 8);
 }
@@ -92,8 +103,8 @@ static void show_config(void) {
     display_show_lines(lines, 8);
 }
 static void show_device_menu(void) {
-    const char *options[] = {"1 AVAL COMPLETA", "2 AVAL INDIVIDUAL", "3 SESSOES", "4 INFO DISPOSITIVO"};
-    char rows[4][16];
+    const char *options[] = {"AVAL COMPLETA", "AVAL INDIVIDUAL", "SESSOES", "INFO DA PLACA"};
+    char rows[4][24];
     const char *lines[] = {"MENU PRINCIPAL", "", rows[0], rows[1], rows[2], rows[3], "", "A OK  B VOLTAR"};
     for (unsigned int i = 0; i < 4; ++i)
         snprintf(rows[i], sizeof(rows[i]), "%c%s", menu_option == i ? '-' : ' ', options[i]);
@@ -102,11 +113,11 @@ static void show_device_menu(void) {
 
 static void show_device_info(void) {
     char rows[8][24];
-    snprintf(rows[0], sizeof(rows[0]), "ID: %s", device_id_str);
+    snprintf(rows[0], sizeof(rows[0]), "%s", device_id_str);
     if (app_has_patient()) {
-        snprintf(rows[1], sizeof(rows[1]), "Paciente: %s", app_patient_id());
+        snprintf(rows[1], sizeof(rows[1]), "%s", app_patient_id());
     } else {
-        snprintf(rows[1], sizeof(rows[1]), "Paciente: NAO VINCULADO");
+        snprintf(rows[1], sizeof(rows[1]), "SEM PACIENTE");
     }
     communication_status_t net = communication_status();
     const char *net_str;
@@ -114,34 +125,21 @@ static void show_device_info(void) {
     case COMM_ONLINE: net_str = "MQTT ONLINE"; break;
     case COMM_BROKER_WAIT: net_str = "MQTT AGUARDANDO"; break;
     case COMM_WIFI_WAIT: net_str = "WIFI CONECTANDO"; break;
-    case COMM_WIFI_NOT_FOUND: net_str = "REDE NAO ENCONTRADA"; break;
-    case COMM_WIFI_BAD_AUTH: net_str = "SENHA WIFI INVALIDA"; break;
+    case COMM_WIFI_NOT_FOUND: net_str = "REDE AUSENTE"; break;
+    case COMM_WIFI_BAD_AUTH: net_str = "VER SENHA WIFI"; break;
     case COMM_WIFI_NO_IP: net_str = "WIFI SEM IP"; break;
     default: net_str = "SEM RADIO"; break;
     }
     snprintf(rows[2], sizeof(rows[2]), "%s", net_str);
     snprintf(rows[3], sizeof(rows[3]), "MPU1: %s", monitoring_sensor_ready(0) ? "OK" : "FALHA");
     snprintf(rows[4], sizeof(rows[4]), "MPU2: %s", monitoring_sensor_ready(1) ? "OK" : "FALHA");
-    const char *lines[] = {"INFO DISPOSITIVO", rows[0], rows[1], rows[2], rows[3], rows[4], "", "B VOLTAR"};
+    const char *lines[] = {"INFO DISPOSITIVO", rows[0], rows[1], rows[2], rows[3], rows[4], "A CONFIGURAR", "B VOLTAR"};
     display_show_lines(lines, 8);
 }
 
 static void show_sessions(void) {
-    const session_t *s = session_current();
-    char state_str[16];
-    switch (s->state) {
-    case SESSION_IDLE: snprintf(state_str, sizeof(state_str), "OCIOSA"); break;
-    case SESSION_RUNNING: snprintf(state_str, sizeof(state_str), "ATIVA"); break;
-    case SESSION_PAUSED: snprintf(state_str, sizeof(state_str), "PAUSADA"); break;
-    case SESSION_COMPLETE: snprintf(state_str, sizeof(state_str), "CONCLUIDA"); break;
-    case SESSION_INTERRUPTED: snprintf(state_str, sizeof(state_str), "INTERROMPIDA"); break;
-    default: snprintf(state_str, sizeof(state_str), "ERRO"); break;
-    }
-    char id_str[24];
-    snprintf(id_str, sizeof(id_str), "ID: %016llx", (unsigned long long)s->id);
-    const char *patient = app_has_patient() ? app_patient_id() : "NENHUM";
-    const char *lines[] = {"SESSOES", id_str, patient, state_str, "TESTES: --", "DURACAO: --", "A INICIAR", "B VOLTAR"};
-    display_show_lines(lines, 8);
+    const char *lines[] = {"SESSOES", "SEM SESSAO ATIVA", "", "A INICIAR", "JOY VOLTAR"};
+    display_show_lines(lines, 5);
 }
 
 static void show_session_active(void) {
@@ -150,12 +148,14 @@ static void show_session_active(void) {
     unsigned minutes = (unsigned)(active / 60000000ULL);
     unsigned seconds = (unsigned)((active % 60000000ULL) / 1000000ULL);
     char id_str[24];
-    snprintf(id_str, sizeof(id_str), "ID: %016llx", (unsigned long long)s->id);
-    const char *patient = app_has_patient() ? app_patient_id() : "NENHUM";
+    snprintf(id_str, sizeof(id_str), "%016llx", (unsigned long long)s->id);
+    const char *patient = s->patient_id[0] ? s->patient_id : "SEM PACIENTE";
     const char *state_str = s->state == SESSION_RUNNING ? "ATIVA" : s->state == SESSION_PAUSED ? "PAUSADA" : "ENCERRADA";
     char time_str[16];
     snprintf(time_str, sizeof(time_str), "%02u:%02u", minutes, seconds);
-    const char *lines[] = {"SESSAO ATIVA", id_str, patient, state_str, time_str, "TESTES: --", "B ENCERRAR", "JOY VOLTAR"};
+    char tests[24];
+    snprintf(tests, sizeof(tests), "TESTES %u", test_count);
+    const char *lines[] = {"SESSAO ATIVA", id_str, patient, state_str, time_str, tests, "B ENCERRAR", "JOY VOLTAR"};
     display_show_lines(lines, 8);
 }
 
@@ -168,7 +168,7 @@ static void show_evaluation_results(void) {
         if (i < e->count) snprintf(rows[i], sizeof(rows[i]), "%s %s", names[e->steps[i].module], status[e->steps[i].status]);
         else rows[i][0] = 0;
     }
-    const char *lines[] = {"RESUMO SESSAO", session_current()->state == SESSION_COMPLETE ? "CONCLUIDA" : "ENCERRADA",
+    const char *lines[] = {"RESUMO AVALIACAO", manual_session ? "SESSAO ABERTA" : session_current()->state == SESSION_COMPLETE ? "CONCLUIDA" : "ENCERRADA",
         rows[0], rows[1], rows[2], rows[3], rows[4], "A OU B MENU"};
     display_show_lines(lines, 8);
     if (stdio_usb_connected()) {
@@ -182,7 +182,12 @@ static void show_evaluation_results(void) {
 
 static void begin_cognitive(unsigned test) {
     const session_kind_t kinds[] = {SESSION_MOT, SESSION_RTI, SESSION_PRM, SESSION_PAL};
-    if (!evaluation_current()->active) session_begin(kinds[test], time_us_64());
+    if (!evaluation_current()->active && !manual_session) begin_session(kinds[test]);
+    telemetry_next_run();
+    counted_test = false;
+    static const char *const modules[] = {"mot", "rti", "prm", "pal"};
+    telemetry_emit(session_current()->id, time_us_64(), "test_start", true,
+                   "{\"module\":\"%s\"}", modules[test]);
     assessment_begin(test);
     if (session_current()->config.cognitive_mpu) {
         monitoring_start_continuous(now_ms());
@@ -271,7 +276,7 @@ static void enter_state(app_state_t next) {
         break;
     }
     case APP_EVAL_SETUP: {
-        const char *lines[] = {session_current()->kind == SESSION_FULL ? "AVAL COMPLETA" : "BATERIA", "VEJA CONFIG", "UMA POR VEZ", "A PROX B FIM", "CLIQUE PAUSA", "", "A INICIAR", "B CANCELAR"};
+        const char *lines[] = {full_evaluation ? "AVAL COMPLETA" : "BATERIA", "VEJA CONFIG", "UMA POR VEZ", "A PROX B FIM", "CLIQUE PAUSA", "", "A INICIAR", "B CANCELAR"};
         display_show_lines(lines, 8); break;
     }
     case APP_EVAL_RESULTS:
@@ -284,6 +289,11 @@ static void enter_state(app_state_t next) {
         show_config(); break;
     case APP_DEVICE_INFO:
         show_device_info(); break;
+    case APP_SESSION_CLOSE: {
+        const char *lines[] = {"ENCERRAR SESSAO?", "", "A CONFIRMAR", "B CANCELAR"};
+        display_show_lines(lines, 4);
+        break;
+    }
     case APP_SESSIONS:
         show_sessions(); break;
     case APP_SESSION_ACTIVE:
@@ -295,7 +305,8 @@ static void evaluation_end(session_state_t reason);
 static void finish_session(monitoring_end_t reason) {
     monitoring_stop(now_ms(), reason);
     reason = monitoring_result()->reason;
-    if (!evaluation_current()->active) session_finish(reason == MONITORING_COMPLETE ? SESSION_COMPLETE : reason == MONITORING_INTERRUPTED ? SESSION_INTERRUPTED : SESSION_ERROR, time_us_64());
+    ++test_count;
+    if (!evaluation_current()->active) finish_automatic(reason == MONITORING_COMPLETE ? SESSION_COMPLETE : reason == MONITORING_INTERRUPTED ? SESSION_INTERRUPTED : SESSION_ERROR);
     if (evaluation_current()->active) {
         evaluation_record(reason == MONITORING_COMPLETE ? STEP_COMPLETE : reason == MONITORING_INTERRUPTED ? STEP_INTERRUPTED : STEP_ERROR, 0, 0, 0);
         if (reason != MONITORING_COMPLETE) { evaluation_end(reason == MONITORING_INTERRUPTED ? SESSION_INTERRUPTED : SESSION_ERROR); return; }
@@ -307,7 +318,7 @@ static void finish_session(monitoring_end_t reason) {
 static void evaluation_end(session_state_t reason) {
     preparing_test = -1;
     if (reason != SESSION_COMPLETE) evaluation_cancel(reason == SESSION_ERROR);
-    session_finish(reason, time_us_64());
+    finish_automatic(reason);
     enter_state(APP_EVAL_RESULTS);
 }
 static void launch_cognitive(unsigned test) {
@@ -333,8 +344,11 @@ static void launch_step(void) {
 }
 static void launch_evaluation(bool full) {
     if (!matrix_ready) { enter_state(APP_MOT_ERROR); return; }
-    session_begin(full ? SESSION_FULL : SESSION_BATTERY, time_us_64());
-    if (evaluation_begin(full, session_current())) enter_state(APP_EVAL_SETUP);
+    if (!manual_session && !begin_session(full ? SESSION_FULL : SESSION_BATTERY)) return;
+    if (evaluation_begin(full, session_current())) {
+        full_evaluation = full;
+        enter_state(APP_EVAL_SETUP);
+    }
 }
 static void evaluation_continue(control_event_t event) {
     if (event == CONTROL_BACK) evaluation_end(SESSION_INTERRUPTED);
@@ -361,17 +375,19 @@ const char *app_device_id(void) {
 }
 
 const char *app_patient_id(void) {
-    return patient_assoc_patient_id();
+    static char patient[PATIENT_ID_MAX + 1];
+    patient_assoc_copy(patient);
+    return patient;
 }
 
 bool app_has_patient(void) {
-    return patient_assoc_has_patient();
+    return app_patient_id()[0] != 0;
 }
 
 void app_init(void) {
     evaluation_cancel(false);
     communication_init();
-    patient_assoc_init();
+    manual_session = false;
     session_init(get_rand_32());
     controls_init();
     display_init();
@@ -387,10 +403,11 @@ void app_init(void) {
 }
 
 static void report_cognitive_sensor_error(void) {
+    if (!counted_test) { ++test_count; counted_test = true; }
     if (evaluation_current()->active) {
         record_cognitive_step(true);
     } else {
-        session_finish(SESSION_ERROR, time_us_64());
+        finish_automatic(SESSION_ERROR);
         const char *lines[] = {"FALHA MPU", "TESTE ENCERRADO", "", "VER SERIAL USB", "A OU B VOLTAR"};
         display_show_lines(lines, 5);
     }
@@ -412,7 +429,9 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         }
         if (evaluation_current()->active && assessment_finished()) { assessment_update(CONTROL_NONE, button, event_us, processing_us); evaluation_continue(event); return; }
         bool leave = assessment_update(event, button, event_us, processing_us);
-        if (assessment_finished()) {
+        if (assessment_finished() && !counted_test) {
+            counted_test = true;
+            ++test_count;
             if (capturing_cognitive) {
                 monitoring_stop(now_ms(), assessment_interrupted() ? MONITORING_INTERRUPTED : MONITORING_COMPLETE);
                 capturing_cognitive = false;
@@ -422,7 +441,7 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
                 }
             }
             if (evaluation_current()->active) record_cognitive_step(false);
-            else session_finish(assessment_interrupted() ? SESSION_INTERRUPTED : SESSION_COMPLETE, time_us_64());
+            else finish_automatic(assessment_interrupted() ? SESSION_INTERRUPTED : SESSION_COMPLETE);
         }
         if (leave) enter_state(APP_COG_MENU);
         return;
@@ -446,7 +465,7 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         else if (event == CONTROL_CONFIRM) {
             if (menu_option == 0) launch_evaluation(true);
             else if (menu_option == 1) enter_state(APP_COG_MENU);
-            else if (menu_option == 2) enter_state(APP_SESSIONS);
+            else if (menu_option == 2) enter_state(manual_session ? APP_SESSION_ACTIVE : APP_SESSIONS);
             else if (menu_option == 3) enter_state(APP_DEVICE_INFO);
         }
         break;
@@ -482,7 +501,8 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
             preparing_test = -1;
             enter_state(cognitive_states[test]);
         } else if (event == CONTROL_CONFIRM) {
-            if (!evaluation_current()->active) session_begin(SESSION_TREMOR, time_us_64());
+            if (!evaluation_current()->active && !manual_session) begin_session(SESSION_TREMOR);
+            telemetry_next_run();
             monitoring_start(now_ms());
             enter_state(APP_ACQUIRING);
         }
@@ -531,15 +551,16 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         break;
     case APP_COG_MENU:
         if (event == CONTROL_BACK) enter_state(APP_MENU);
-        else if (event == CONTROL_UP) { cognitive_option = (cognitive_option + 4) % 5; show_cognitive_menu(); }
-        else if (event == CONTROL_DOWN) { cognitive_option = (cognitive_option + 1) % 5; show_cognitive_menu(); }
+        else if (event == CONTROL_UP) { cognitive_option = (cognitive_option + 5) % 6; show_cognitive_menu(); }
+        else if (event == CONTROL_DOWN) { cognitive_option = (cognitive_option + 1) % 6; show_cognitive_menu(); }
         else if (event == CONTROL_CONFIRM) {
             if (cognitive_option < 4) {
                 const app_state_t errors[] = {APP_MOT_ERROR, APP_RTI_ERROR, APP_PRM_ERROR, APP_PAL_ERROR};
                 if (matrix_ready) launch_cognitive(cognitive_option);
                 else enter_state(errors[cognitive_option]);
             }
-            else launch_evaluation(false);
+            else if (cognitive_option == 4) launch_evaluation(false);
+            else enter_state(APP_INSTRUCTIONS);
         }
         break;
     case APP_COG_UNAVAILABLE:
@@ -567,14 +588,33 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         } else if (event == CONTROL_BACK) enter_state(APP_MENU);
         break;
     case APP_DEVICE_INFO:
-        if (event == CONTROL_BACK) enter_state(APP_MENU);
-        break;
-    case APP_SESSIONS:
-        if (event == CONTROL_CONFIRM) enter_state(APP_SESSION_ACTIVE);
+        if (event == CONTROL_NONE && now - last_display_ms >= 1000) {
+            last_display_ms = now;
+            show_device_info();
+        } else if (event == CONTROL_CONFIRM) enter_state(APP_INFO);
         else if (event == CONTROL_BACK) enter_state(APP_MENU);
         break;
+    case APP_SESSIONS:
+        if (event == CONTROL_CONFIRM && begin_session(SESSION_MANUAL)) {
+            manual_session = true;
+            test_count = 0;
+            enter_state(APP_SESSION_ACTIVE);
+        } else if (event == CONTROL_PAUSE || event == CONTROL_BACK) enter_state(APP_MENU);
+        break;
     case APP_SESSION_ACTIVE:
-        if (event == CONTROL_BACK) enter_state(APP_MENU);
+        if (event == CONTROL_BACK) enter_state(APP_SESSION_CLOSE);
+        else if (event == CONTROL_PAUSE) enter_state(APP_MENU);
+        else if (now - last_display_ms >= 1000) {
+            last_display_ms = now;
+            show_session_active();
+        }
+        break;
+    case APP_SESSION_CLOSE:
+        if (event == CONTROL_CONFIRM) {
+            session_finish(SESSION_COMPLETE, time_us_64());
+            manual_session = false;
+            enter_state(APP_SESSIONS);
+        } else if (event == CONTROL_BACK || event == CONTROL_PAUSE) enter_state(APP_SESSION_ACTIVE);
         break;
     case APP_UNAVAILABLE:
         if (event == CONTROL_BACK) enter_state(APP_MENU);

@@ -81,6 +81,7 @@ target_compile_definitions(tremo_device PRIVATE PICO_STDIO_USB_STDOUT_TIMEOUT_US
 # Add the standard library to the build
 target_link_libraries(tremo_device
         pico_stdlib
+        pico_unique_id
         pico_rand
         FreeRTOS-Kernel-Heap4)
 
@@ -105,5 +106,5 @@ if(TREMO_MQTT)
     target_compile_definitions(tremo_device PRIVATE TREMO_MQTT_ENABLED=1)
     set(TREMO_NETWORK_CONFIG_DIR "${CMAKE_CURRENT_LIST_DIR}/config" CACHE PATH "Diretorio da configuracao local de rede")
     target_include_directories(tremo_device PRIVATE ${TREMO_NETWORK_CONFIG_DIR} config)
-    target_link_libraries(tremo_device pico_cyw43_arch_lwip_poll pico_lwip_mqtt pico_unique_id)
+    target_link_libraries(tremo_device pico_cyw43_arch_lwip_poll pico_lwip_mqtt)
 endif()

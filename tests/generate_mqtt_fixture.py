@@ -8,7 +8,7 @@ import tempfile
 def generate(module="flow"):
     root = Path(__file__).resolve().parents[1]
     sources = ["tests/export_mqtt_fixture.c"] + [f"src/{name}.c" for name in
-        ("app", "assessment", "evaluation", "monitoring", "mot", "rti", "prm", "pal", "patterns", "session", "telemetry")]
+        ("app", "patient_assoc", "assessment", "evaluation", "monitoring", "mot", "rti", "prm", "pal", "patterns", "session", "telemetry")]
     if module in ("prm", "pal"):
         sources = [f"tests/export_{module}_fixture.c", f"src/{module}.c", "src/patterns.c", "src/session.c", "src/telemetry.c"]
     with tempfile.TemporaryDirectory(prefix="tremo-fixture-") as tmp:

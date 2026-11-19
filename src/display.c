@@ -49,7 +49,7 @@ void display_show_lines(const char *text[], size_t count) {
     memset(ssd, 0, sizeof(ssd));
 
     for (size_t i = 0; i < count; i++) {
-        ssd1306_draw_string(ssd, 5, y, text[i]);
+        ssd1306_draw_string(ssd, strlen(text[i]) >= 16 ? 0 : 5, y, text[i]);
         y += 8;
     }
 

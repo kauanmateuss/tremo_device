@@ -15,7 +15,7 @@ int main(void) {
     app_init(); step(CONTROL_NONE, 2000);
     session_config_t config = *session_config(); config.tests_mask = 3;
     assert(session_configure(config));
-    step(CONTROL_DOWN, 5); step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    choose("AVAL COMPLETA");
     step(CONTROL_CONFIRM, 5);
     step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 5); finish_calibration();
     step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 0);

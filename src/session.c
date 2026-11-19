@@ -1,5 +1,6 @@
 #include "session.h"
 #include "telemetry.h"
+#include <stdio.h>
 static session_t current;
 static session_config_t config;
 static uint32_t nonce, sequence;
@@ -16,9 +17,13 @@ bool session_configure(session_config_t value) {
 }
 const session_config_t *session_config(void) { return &config; }
 bool session_begin(session_kind_t kind, uint64_t now_us) {
+    return session_begin_patient(kind, now_us, "");
+}
+bool session_begin_patient(session_kind_t kind, uint64_t now_us, const char *patient) {
     if (current.state == SESSION_RUNNING || current.state == SESSION_PAUSED || sequence == UINT32_MAX) return false;
     current = (session_t){.id = ((uint64_t)nonce << 32) | ++sequence, .started_us = now_us,
         .state = SESSION_RUNNING, .kind = kind, .config = config};
+    snprintf(current.patient_id, sizeof(current.patient_id), "%s", patient);
     telemetry_start(&current);
     return true;
 }

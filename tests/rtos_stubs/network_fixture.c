@@ -75,3 +75,12 @@ void vApplicationMallocFailedHook(void) { abort(); }
 void vApplicationStackOverflowHook(TaskHandle_t task, char *name) {
     (void)task; (void)name; abort();
 }
+
+void mqtt_set_inpub_callback(mqtt_client_t *c, mqtt_incoming_publish_cb_t topic_cb, mqtt_incoming_data_cb_t data_cb, void *arg) {
+    (void)c; (void)topic_cb; (void)data_cb; (void)arg;
+}
+err_t mqtt_subscribe(mqtt_client_t *c, const char *topic, uint8_t qos, mqtt_request_cb_t cb, void *arg) {
+    (void)c; (void)cb; (void)arg;
+    assert(strstr(topic, "/abcdef0123456789/commands") && qos == 1);
+    return ERR_OK;
+}

@@ -49,7 +49,7 @@ void display_render(void) { assert(display_task_render(frame, &area)); }
 void display_draw_text(const char *text, uint8_t x, uint8_t y) { (void)text; (void)x; (void)y; }
 void display_show_lines(const char *lines[], size_t count) {
     assert(!strcmp(pcTaskGetName(NULL), "TaskSession") && count <= 8);
-    for (size_t i = 0; i < count; ++i) assert(strlen(lines[i]) <= 15);
+    for (size_t i = 0; i < count; ++i) assert(strlen(lines[i]) <= 16);
     display_render();
 }
 bool render_on_display(uint8_t *buffer, struct render_area *value) {
@@ -101,7 +101,7 @@ static void move(unsigned axis, uint16_t value) {
 static void user_script(void *parameter) {
     (void)parameter;
     wait_app(APP_MENU);
-    move(0, 4095); press(5); wait_app(APP_INFO); // Configurações.
+    move(0, 4095); press(5); wait_app(APP_DEVICE_INFO); press(5); wait_app(APP_INFO); // Configurações.
     move(0, 4095); press(5); // MPU COG SIM.
     assert(session_config()->cognitive_mpu);
     press(6); wait_app(APP_MENU);

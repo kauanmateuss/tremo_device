@@ -17,7 +17,7 @@ suites = {
     "oled": ["tests/test_oled.c", "src/ssd1306_i2c.c"],
     "mpu": ["tests/test_mpu.c", "src/mpu6050_i2c.c"],
     "evaluation": ["tests/test_evaluation.c", "src/evaluation.c"],
-    "communication": ["tests/test_communication.c", "src/communication.c"],
+    "communication": ["tests/test_communication.c", "src/communication.c", "src/patient_assoc.c"],
     "telemetry": ["tests/test_telemetry.c"],
     "session": ["tests/test_session.c"],
     "matrix": ["tests/test_matrix.c", "src/matrix.c"],
@@ -26,7 +26,7 @@ suites["flow_input"] = suites["flow"]
 with tempfile.TemporaryDirectory(prefix="tremo-tests-") as directory:
     for name, sources in suites.items():
         sources = sources + ["src/session.c", "src/telemetry.c"]
-        if name in ("flow", "flow_input"): sources += ["src/communication.c"]
+        if name in ("flow", "flow_input"): sources += ["src/communication.c", "src/patient_assoc.c"]
         executable = str(Path(directory) / name)
         extra = ["-DTREMO_MQTT_ENABLED=1", "-I" + str(root / "tests/network_stubs")] if name == "communication" else []
         if name == "flow_input": extra += ["-DTEST_TASK_INPUT=1"]

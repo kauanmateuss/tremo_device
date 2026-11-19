@@ -17,12 +17,4 @@ communication_status_t communication_status(void);
 // Com RTOS, o serviço é automático na TaskMQTT. Sem RTOS, atende uma iteração.
 void communication_update(communication_mode_t mode);
 
-// Publica uma confirmacao de associacao/desassociacao no topico de confirmacoes.
-// Retorna true se a mensagem foi enfileirada para envio.
-bool communication_publish_confirm_assoc(const char *patient_id, bool success);
-bool communication_publish_confirm_disassoc(bool success);
-
-// Processa um comando recebido no topico de comandos.
-// topic: topico da mensagem, payload: dados JSON, payload_len: tamanho em bytes.
-void communication_process_command(const char *topic, const char *payload, size_t payload_len);
 #endif

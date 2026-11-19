@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 typedef enum { SESSION_IDLE, SESSION_RUNNING, SESSION_PAUSED, SESSION_COMPLETE, SESSION_INTERRUPTED, SESSION_ERROR } session_state_t;
-typedef enum { SESSION_TREMOR, SESSION_MOT, SESSION_RTI, SESSION_PRM, SESSION_PAL, SESSION_BATTERY, SESSION_FULL } session_kind_t;
+typedef enum { SESSION_TREMOR, SESSION_MOT, SESSION_RTI, SESSION_PRM, SESSION_PAL, SESSION_BATTERY, SESSION_FULL, SESSION_MANUAL } session_kind_t;
 typedef struct {
     uint32_t duration_ms;
     uint16_t sample_ms;
@@ -13,6 +13,7 @@ typedef struct {
 } session_config_t;
 typedef struct {
     uint64_t id, started_us, ended_us, paused_us, pause_started_us;
+    char patient_id[17];
     uint32_t pauses;
     bool pause_requested;
     session_state_t state;
@@ -24,6 +25,7 @@ void session_init(uint32_t boot_nonce);
 bool session_configure(session_config_t config);
 const session_config_t *session_config(void);
 bool session_begin(session_kind_t kind, uint64_t now_us);
+bool session_begin_patient(session_kind_t kind, uint64_t now_us, const char *patient);
 void session_request_pause(void);
 bool session_pause(uint64_t now_us);
 uint64_t session_resume(uint64_t now_us);
