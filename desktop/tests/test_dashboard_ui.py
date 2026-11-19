@@ -80,6 +80,22 @@ class DashboardUITests(unittest.TestCase):
         self.wait_for(lambda: window.snapshot["report"] is None)
         self.assertIs(window.stack.currentWidget(), window.empty_page)
 
+    def test_compare_reference_across_filters(self):
+        w = self.window
+        w.pages.setCurrentIndex(1)
+        w.tabs.setCurrentWidget(w.compare)
+        reference = w.selected
+        w.compare.pin.click()
+        w.state_filter.setCurrentIndex(w.state_filter.findData(4))
+        self.wait_for(lambda: not w.busy and w.snapshot.get("comparison"))
+        self.assertEqual(w.reference, reference)
+        self.assertEqual(w.tabs.currentWidget(), w.compare)
+        self.assertEqual(w.compare.table.item(7, 1).text(), "Concluída")
+        self.assertEqual(w.compare.table.item(7, 2).text(), "Interrompida")
+        w.overview.history.click()
+        self.wait_for(lambda: not w.busy and w.selected == reference)
+        self.assertEqual(w.tabs.currentIndex(), 2)
+
     def test_zoom_drag_refresh_and_reset(self):
         window = self.window
         window.pages.setCurrentIndex(1)

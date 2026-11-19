@@ -4,10 +4,10 @@ import sqlite3
 from hashlib import sha256
 from datetime import datetime
 from pathlib import Path
-from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot, QSize
+from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot, QSize, QDate
 from PySide6.QtWidgets import (QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout,
     QGridLayout, QListWidget, QListWidgetItem, QLineEdit, QComboBox, QPushButton,
-    QCheckBox, QFileDialog, QStackedWidget, QTabWidget, QScrollArea)
+    QCheckBox, QDateEdit, QFileDialog, QStackedWidget, QTabWidget, QScrollArea)
 from tremo_desktop.services.dashboard import STATES, KINDS
 from .components import label, MetricCard, date_text, duration
 from .worker import DashboardWorker
@@ -16,6 +16,7 @@ from .charts import TremorPanel
 from .settings import SettingsPanel
 from .about import AboutPanel
 from .overview import OverviewPanel
+from .comparison import ComparisonPanel
 from tremo_desktop.transport.mqtt import Collector
 
 
@@ -29,6 +30,8 @@ class DashboardWindow(QMainWindow):
         self.demo = demo
         self.selected = None
         self.snapshot = None
+        self.reference = None
+        self.session_limit = 200
         self.revision = 0
         self.busy = False
         self.closing = False
@@ -66,9 +69,11 @@ class DashboardWindow(QMainWindow):
         self.debounce = QTimer(self)
         self.debounce.setSingleShot(True)
         self.debounce.setInterval(250)
-        self.debounce.timeout.connect(self.invalidate)
+        self.debounce.timeout.connect(self.filter_changed)
         self.search.textChanged.connect(lambda: self.debounce.start())
-        self.state_filter.currentIndexChanged.connect(self.invalidate)
+        for combo in (self.state_filter, self.patient_filter, self.device_filter):
+            combo.currentIndexChanged.connect(self.filter_changed)
+        self.date_filter.dateChanged.connect(self.filter_changed)
         self.session_list.currentItemChanged.connect(self._selection_changed)
         self.refresh_button.clicked.connect(self.invalidate)
         QTimer.singleShot(0, self.refresh)
@@ -122,11 +127,32 @@ class DashboardWindow(QMainWindow):
             self.state_filter.addItem(STATES[state], state)
         self.state_filter.setAccessibleName("Filtrar por estado da sessão")
         side.addWidget(self.state_filter)
+        self.patient_filter = QComboBox()
+        self.device_filter = QComboBox()
+        for combo, title in ((self.patient_filter, "Todos os pacientes"), (self.device_filter, "Todos os dispositivos")):
+            combo.addItem(title, None)
+            combo.setAccessibleName(title)
+            side.addWidget(combo)
+        self.date_filter = QDateEdit()
+        self.date_filter.setCalendarPopup(True)
+        self.date_filter.setDisplayFormat("dd/MM/yyyy")
+        self.date_filter.setSpecialValueText("Todas as datas")
+        self.date_filter.setDate(self.date_filter.minimumDate())
+        self.date_filter.calendarWidget().setCurrentPage(QDate.currentDate().year(), QDate.currentDate().month())
+        self.date_filter.setAccessibleName("Data local da sessão")
+        side.addWidget(self.date_filter)
+        clear = QPushButton("Limpar filtros")
+        clear.clicked.connect(self.clear_filters)
+        side.addWidget(clear)
         self.session_list = QListWidget()
         self.session_list.setAccessibleName("Sessões recebidas")
         side.addWidget(self.session_list, 1)
         self.list_count = label("Nenhuma sessão", "muted")
         side.addWidget(self.list_count)
+        self.more = QPushButton("Carregar mais sessões")
+        self.more.clicked.connect(self.load_more)
+        self.more.hide()
+        side.addWidget(self.more)
         self.auto_refresh = QCheckBox("Atualizar a cada 3 segundos")
         self.auto_refresh.setChecked(True)
         side.addWidget(self.auto_refresh)
@@ -199,6 +225,9 @@ class DashboardWindow(QMainWindow):
             scroll.setWidgetResizable(True)
             scroll.setWidget(widget)
             self.tabs.addTab(scroll, title)
+        self.compare = ComparisonPanel()
+        self.compare.pin.clicked.connect(self.pin_reference)
+        self.tabs.addTab(self.compare, "Comparar")
         content.addWidget(self.tabs, 1)
         self.stack.addWidget(self.content)
         main.addWidget(self.stack, 1)
@@ -211,8 +240,43 @@ class DashboardWindow(QMainWindow):
             self.pages.addWidget(scroll)
         self.statusBar().showMessage("Consultando banco local…")
 
+    def filter_changed(self):
+        self.session_limit = 200
+        self.invalidate()
+
+    def clear_filters(self):
+        self.search.clear()
+        for combo in (self.patient_filter, self.device_filter, self.state_filter):
+            combo.setCurrentIndex(0)
+        self.date_filter.setDate(self.date_filter.minimumDate())
+        self.debounce.stop()
+        self.filter_changed()
+
+    def load_more(self):
+        self.session_limit += 200
+        self.invalidate()
+
+    def pin_reference(self):
+        self.reference = self.selected
+        self.invalidate()
+
+    @staticmethod
+    def update_filter(combo, values):
+        if [combo.itemData(i) for i in range(1, combo.count())] == values:
+            return
+        current = combo.currentData()
+        combo.blockSignals(True)
+        while combo.count() > 1:
+            combo.removeItem(combo.count()-1)
+        for value in values:
+            combo.addItem(value or "Sem paciente", value)
+        combo.setCurrentIndex(max(0, combo.findData(current)))
+        combo.blockSignals(False)
+
     def open_latest(self):
         report = self.snapshot["latest"]["report"]
+        self.clear_filters()
+        self.device_filter.setCurrentIndex(max(0, self.device_filter.findData(report["device"])))
         self.selected = (report["device"], report["session"])
         self.search.setText(report["session"])
         self.state_filter.setCurrentIndex(0)
@@ -235,7 +299,10 @@ class DashboardWindow(QMainWindow):
         self.busy = True
         self.requested.emit(self.revision, dict(path=self.path, selected=self.selected,
                             query=self.search.text(), state=self.state_filter.currentData(),
-                            overview_device=self.overview.device_choice.currentText()))
+                            overview_device=self.overview.device_choice.currentText(),
+                            patient=self.patient_filter.currentData(), device=self.device_filter.currentData(),
+                            day=self.date_filter.date().toString("yyyy-MM-dd") if self.date_filter.date() != self.date_filter.minimumDate() else None,
+                            limit=self.session_limit, reference=self.reference))
 
     def _selection_changed(self, current, previous):
         if current is not None:
@@ -260,30 +327,37 @@ class DashboardWindow(QMainWindow):
                 self.settings._refresh()
         self.snapshot = data
         self.selected = data["selected"]
+        self.update_filter(self.patient_filter, data["patients"])
+        self.update_filter(self.device_filter, data["devices"])
+        self.more.setVisible(data["has_more"])
         self.session_list.blockSignals(True)
         scroll = self.session_list.verticalScrollBar().value()
         self.session_list.clear()
         for session in data["sessions"]:
             key = (session["device"], session["session"])
-            text = f"{date_text(session['received_first'], short=True)} · {STATES.get(session['state'], 'Desconhecido')}\n{session['kind']}\n#{session['session'][-8:]} · placa …{session['device'][-6:]}"
+            status = STATES.get(session["state"], "Desconhecido")
+            date = date_text(session["received_first"], short=True)
+            patient = session["patient_id"] or "Sem paciente"
+            quality = " · Incompleta" if session["incomplete"] else ""
+            text = f"{date}\n{status}{quality}\n{patient}\n#{key[1][-8:]} · placa …{key[0][-6:]}"
             item = QListWidgetItem(text)
-            item.setSizeHint(QSize(230, 98))
+            item.setSizeHint(QSize(160, 105))
             item.setData(Qt.ItemDataRole.UserRole, key)
-            item.setToolTip(f"Sessão {session['session']}\nPlaca {session['device']}")
+            item.setToolTip(f"{session['kind']} · {patient}\nSessão {key[1]}\nPlaca {key[0]}")
             self.session_list.addItem(item)
             if key == self.selected:
                 self.session_list.setCurrentItem(item)
         self.session_list.verticalScrollBar().setValue(scroll)
         self.session_list.blockSignals(False)
         count = len(data["sessions"])
-        self.list_count.setText(f"{count} sessões encontradas" if count < 200 else "200 mais recentes · refine a busca")
+        self.list_count.setText(f"{count} sessões exibidas")
         self.statusBar().showMessage(f"Consulta: {datetime.now():%H:%M:%S}  •  Banco: {self.path.name}")
         self.statusBar().setToolTip(str(self.path))
         if not data["report"]:
             self.stack.setCurrentWidget(self.empty_page)
             self.empty_title.setText("Aguardando a primeira sessão" if data["missing"] else "Nenhuma sessão encontrada")
-            self.empty_text.setText("Inicie o coletor MQTT usando este banco e realize uma avaliação na placa.\nO dashboard atualizará quando os registros chegarem." if data["missing"] or not (self.search.text() or self.state_filter.currentData()) else
-                                    "Altere os filtros ou abra outro banco para consultar as avaliações.")
+            self.empty_text.setText("Altere os filtros para consultar outras avaliações." if data["devices"] else
+                                    "O histórico será atualizado quando o coletor receber uma sessão.")
             return
         self.stack.setCurrentWidget(self.content)
         report = data["report"]
@@ -314,7 +388,8 @@ class DashboardWindow(QMainWindow):
         self.results.set_data(data)
         self.tremor.set_data(data, reset=changed)
         self.details.set_data(data)
-        if changed and self.tabs.currentIndex() != 2:
+        self.compare.set_data(report, self.reference, data["comparison"])
+        if changed and self.tabs.currentIndex() < 2:
             self.tabs.setCurrentIndex(1 if config.get("kind") == 0 else 0)
 
     @Slot(int, str)
@@ -351,9 +426,8 @@ class DashboardWindow(QMainWindow):
             self.path = self.settings.path = Path(path).resolve()
             self.selected = None
             self.snapshot = None
-            self.search.clear()
-            self.state_filter.setCurrentIndex(0)
-            self.invalidate()
+            self.reference = None
+            self.clear_filters()
 
     def closeEvent(self, event):
         if self.collector:

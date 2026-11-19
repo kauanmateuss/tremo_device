@@ -1,4 +1,3 @@
-import json
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QComboBox, QTableWidgetItem
 from PySide6.QtCore import Qt
 from tremo_desktop.services.dashboard import MODULES, KINDS
@@ -73,6 +72,14 @@ class ResultsPanel(QWidget):
             metric = report["modules"].get(module)
             training = sum(t["module"] == module and t["training"] for t in trials)
             if not metric:
+                if (report["configuration"] or {}).get("kind") == 7:
+                    started = any(r["module"] == module for r in report["runs"])
+                    status.setText("Sem resumo" if started else "Sem execução")
+                    description.setText("Resultado ainda indisponível" if started else "Nenhuma execução registrada")
+                    value.setText("—")
+                    counts.setText("")
+                    extra.setText("")
+                    continue
                 status.setText("Sem resumo" if module in expected else "Não previsto")
                 value.setText("—")
                 description.setText("Aguardando resultado" if module in expected and report["state"] in (1, 2) else
@@ -122,11 +129,13 @@ class DetailsPanel(QWidget):
         self.module.addItem("Todos os testes", None)
         for key in MODULES:
             self.module.addItem(key.upper(), key)
+        self.run_filter = QComboBox()
+        self.run_filter.setAccessibleName("Filtrar tentativas por execução")
         self.phase = QComboBox()
         self.phase.addItem("Somente avaliação", False)
         self.phase.addItem("Somente treino", True)
         self.phase.addItem("Treino e avaliação", None)
-        for widget in (self.module, self.phase):
+        for widget in (self.module, self.run_filter, self.phase):
             filters.addWidget(widget)
             widget.currentIndexChanged.connect(self.refresh_trials)
         layout.addLayout(filters)
@@ -144,11 +153,21 @@ class DetailsPanel(QWidget):
         text += f"Primeiro recebimento: {date_text(r['first_received_utc'])}\n"
         text += f"Último recebimento: {date_text(r['last_received_utc'])}\n"
         text += f"Paciente: {r['patient_id'] or 'Sem associação registrada'}"
+        selected_run = self.run_filter.currentData()
+        self.run_filter.blockSignals(True)
+        self.run_filter.clear()
+        self.run_filter.addItem("Todas as execuções", None)
         for run in r["runs"]:
-            detail = json.loads(run["data"] or "{}")
-            scores = (f" · {detail['correct']} acertos, {detail['wrong']} erros, {detail['omissions']} omissões"
-                      if "correct" in detail else "")
-            text += f"\nExecução {run['run_number']} · {run['module'].upper()} · {run['state']}{scores}"
+            name = f"{run['module'].upper()} · execução {run['run_number']}"
+            self.run_filter.addItem(name, run["test_run_id"])
+            metrics = run["metrics"] or {}
+            score = (number(metrics.get("mean_valid_ms"), " ms", 1) if run["module"] == "rti"
+                     else number(metrics.get("accuracy_percent"), "%", 1))
+            status = {"concluida": "Concluída", "interrompida": "Interrompida",
+                      "em_andamento": "Sem resumo final"}.get(run["state"], run["state"])
+            text += f"\n{name} · {status} · {score}"
+        self.run_filter.setCurrentIndex(max(0, self.run_filter.findData(selected_run)))
+        self.run_filter.blockSignals(False)
         if config:
             text += f"\n{KINDS.get(config['kind'], 'Avaliação')} · MPU: {config['duration_ms'] // 1000} s / {1000 / config['sample_ms']:g} Hz · {config['protocol']}"
         self.metadata.setText(text)
@@ -162,7 +181,8 @@ class DetailsPanel(QWidget):
         selected_module, selected_phase = self.module.currentData(), self.phase.currentData()
         rows = [t for t in self.data["trials"] if
                 (selected_module is None or t["module"] == selected_module) and
-                (selected_phase is None or t["training"] == selected_phase)]
+                (selected_phase is None or t["training"] == selected_phase) and
+                (self.run_filter.currentData() is None or t["test_run_id"] == self.run_filter.currentData())]
         self.table.setRowCount(len(rows))
         self.empty.setVisible(not rows)
         counters = {}

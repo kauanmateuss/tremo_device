@@ -67,9 +67,10 @@ def latest_overview(repository, device):
     return result
 
 
-def load_dashboard(path, selected=None, query="", state=None, overview_device=None):
+def load_dashboard(path, selected=None, query="", state=None, overview_device=None,
+                   patient=None, device=None, day=None, limit=200, reference=None):
     result = dict(sessions=[], selected=None, report=None, trials=[], samples={},
-                  sample_counts={}, missing=not Path(path).is_file())
+                  sample_counts={}, patients=[], devices=[], has_more=False, comparison=None, missing=not Path(path).is_file())
     if result["missing"]:
         return result
     repository = Repository(path, read_only=True)
@@ -79,7 +80,13 @@ def load_dashboard(path, selected=None, query="", state=None, overview_device=No
         result["latest"] = latest_overview(repository, overview_device)
         report = (result["latest"] or {}).get("report", {})
         key = (report.get("device"), report.get("session"))
-        sessions = repository.dashboard_sessions(query.strip(), state)
+        result["patients"] = [row[0] for row in repository.db.execute(
+            "SELECT DISTINCT coalesce(patient_id,'') FROM sessions ORDER BY 1")]
+        result["devices"] = [row[0] for row in repository.db.execute(
+            "SELECT DISTINCT device FROM sessions ORDER BY device")]
+        sessions = repository.dashboard_sessions(query.strip(), state, limit+1, patient, device, day)
+        result["has_more"] = len(sessions) > limit
+        sessions = sessions[:limit]
         for item in sessions:
             config = json.loads(item.pop("start_json") or "null")
             item["kind"] = KINDS.get(config["kind"], "Avaliação") if config else "Início não recebido"
@@ -93,6 +100,11 @@ def load_dashboard(path, selected=None, query="", state=None, overview_device=No
                       sample_counts=repository.sample_counts(*selected),
                       samples={sensor: repository.chart_samples(*selected, sensor, limit=10000)
                                for sensor in (1, 2)})
+        if reference and reference != selected:
+            try:
+                result["comparison"] = report if reference == key else repository.overview(*reference)
+            except KeyError:
+                pass  # A referência pode ter sido removida durante a navegação.
         return result
     finally:
         repository.close()

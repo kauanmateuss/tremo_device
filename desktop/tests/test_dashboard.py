@@ -84,6 +84,36 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(overview["counts"], (0, 0))
         self.assertFalse(overview["report"])
 
+    def test_history_filters_pagination_and_comparison(self):
+        from datetime import datetime
+        first = load_dashboard(self.path, limit=1)
+        self.assertTrue(first["has_more"])
+        baseline = first["selected"]
+        latest = first["report"]
+        self.assertFalse(load_dashboard(self.path, limit=3)["has_more"])
+        interrupted = load_dashboard(self.path, state=4)["sessions"][0]
+        day = datetime.fromisoformat(interrupted["received_first"]).astimezone().date().isoformat()
+        snapshot = load_dashboard(self.path, patient=latest["patient_id"], device=baseline[0],
+                                  state=4, day=day, reference=baseline)
+        self.assertEqual(len(snapshot["sessions"]), 1)
+        self.assertTrue(snapshot["sessions"][0]["incomplete"])
+        self.assertEqual(snapshot["comparison"]["session"], baseline[1])
+        self.assertEqual(snapshot["report"]["state"], 4)
+        self.assertFalse(load_dashboard(self.path, day=day, state=3)["sessions"])
+        self.assertFalse(load_dashboard(self.path, patient="outro")["sessions"])
+
+    def test_history_reaches_sessions_beyond_first_200(self):
+        with sqlite3.connect(self.path) as db:
+            db.executemany("""INSERT INTO sessions(device,session,received_first,received_last)
+                VALUES('0123456789abcdef',?,'2020-01-01','2020-01-01')""",
+                [(f"{n:016x}",) for n in range(10, 215)])
+        first = load_dashboard(self.path)
+        self.assertEqual(len(first["sessions"]), 200)
+        self.assertTrue(first["has_more"])
+        expanded = load_dashboard(self.path, limit=400)
+        self.assertEqual(len(expanded["sessions"]), 208)
+        self.assertFalse(expanded["has_more"])
+
     def test_gaps_invalid_values_and_shared_time(self):
         def sample(sequence, timestamp, valid=True):
             return dict(sequence=sequence, t_us=timestamp, valid=valid,

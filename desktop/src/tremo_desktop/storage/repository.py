@@ -58,6 +58,21 @@ def encoded(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
+def cognitive_metrics(module, data, trials):
+    measured = [t for t in trials if not t["training"]]
+    counts = [sum(t["outcome"] == outcome for t in measured) for outcome in (0, 1, 2)]
+    coherent = len(trials) == data["record_count"] and counts == [data["correct"], data["wrong"], data["omissions"]]
+    latency_sum = sum(t["latency_us"] or 0 for t in measured if t["outcome"] == 0)
+    coherent = coherent and latency_sum == data["valid_time_us"]
+    total = data["correct"] + data["wrong"] + data["omissions"]
+    metrics = dict(data, received_trials=len(trials), metrics_verified=coherent,
+                   mean_valid_ms=data["valid_time_us"] / data["correct"] / 1000 if coherent and data["correct"] else None)
+    if module == "rti":
+        metrics.update(responses=data["correct"], anticipations=data["wrong"])
+    else: metrics["accuracy_percent"] = 100 * data["correct"] / total if coherent and total else None
+    return metrics
+
+
 def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -211,6 +226,10 @@ class Repository:
         if gaps: issues.append(f"{gaps} mensagens ausentes")
         if end and end["tx_dropped"]: issues.append(f'{end["tx_dropped"]} mensagens descartadas no dispositivo')
         if expected is not None and any(n >= expected for n in seqs): issues.append("mensagens após encerramento")
+        trial_groups = {}
+        for trial in self.db.execute("""SELECT module,run,training,outcome,latency_us FROM trials
+                WHERE device=? AND session=?""", key):
+            trial_groups.setdefault((trial["module"], trial["run"] or 1), []).append(trial)
         modules = {}
         for result in self.db.execute("SELECT module,data,seq FROM results WHERE device=? AND session=?", key):
             module, data = result["module"], json.loads(result["data"])
@@ -224,20 +243,9 @@ class Repository:
                 modules[module] = dict(data, received_valid=received, nominal_samples_per_sensor=nominal,
                                        coverage=[min(1, n / nominal) if nominal else None for n in received])
                 continue
-            trials = self.db.execute("SELECT training,outcome,latency_us FROM trials WHERE device=? AND session=? AND module=? AND run=?", (*key, module, run)).fetchall()
-            measured = [t for t in trials if not t["training"]]
-            counts = [sum(t["outcome"] == outcome for t in measured) for outcome in (0, 1, 2)]
-            coherent = len(trials) == data["record_count"] and counts == [data["correct"], data["wrong"], data["omissions"]]
-            latency_sum = sum(t["latency_us"] or 0 for t in measured if t["outcome"] == 0)
-            coherent = coherent and latency_sum == data["valid_time_us"]
-            if not coherent: issues.append(f"registros e resumo de {module.upper()} não conferem")
-            total = data["correct"] + data["wrong"] + data["omissions"]
-            metrics = dict(data, received_trials=len(trials), metrics_verified=coherent,
-                           mean_valid_ms=data["valid_time_us"] / data["correct"] / 1000 if coherent and data["correct"] else None)
-            if module == "rti":
-                metrics.update(responses=data["correct"], anticipations=data["wrong"])
-            else: metrics["accuracy_percent"] = 100 * data["correct"] / total if coherent and total else None
-            modules[module] = metrics
+            modules[module] = cognitive_metrics(module, data, trial_groups.get((module, run or 1), []))
+            if not modules[module]["metrics_verified"]:
+                issues.append(f"registros e resumo de {module.upper()} não conferem")
         if config and config["kind"] != 7 and end and end["state"] == 3:
             wanted = {0: ["mpu"], 1: ["mot"], 2: ["rti"], 3: ["prm"], 4: ["pal"]}.get(config["kind"])
             if wanted is None:
@@ -245,7 +253,22 @@ class Repository:
                 if config["kind"] == 6: wanted += ["mpu"]
             for module in wanted:
                 if module not in modules: issues.append(f"resumo de {module.upper()} ausente")
-        return dict(device=device, session=session, patient_id=row["patient_id"], runs=self.test_runs_by_session(*key), state=row["state"], configuration=config, timing=end,
+        runs = self.test_runs_by_session(*key)
+        for execution in runs:
+            summary = json.loads(execution["data"] or "{}")
+            required = {"record_count", "correct", "wrong", "omissions", "valid_time_us"}
+            execution["metrics"] = None
+            if required.issubset(summary):
+                module = execution["module"]
+                trials = trial_groups.get((module, execution["run_number"]), [])
+                execution["metrics"] = cognitive_metrics(module, summary, trials)
+                if not execution["metrics"]["metrics_verified"]:
+                    issue = f"registros e resumo de {module.upper()} não conferem"
+                    if issue not in issues:
+                        issues.append(issue)
+        if end and any(not r["finished_at"] for r in runs):
+            issues.append("execução de teste sem resumo final")
+        return dict(device=device, session=session, patient_id=row["patient_id"], runs=runs, state=row["state"], configuration=config, timing=end,
                     first_received_utc=row["received_first"], last_received_utc=row["received_last"],
                     quality=dict(complete=not issues, issues=issues, received_messages=len(seqs), expected_messages=expected),
                     modules=modules, protocol_label="Experimental adaptado; sem escores clínicos normativos")
@@ -256,13 +279,23 @@ class Repository:
                      acceleration_g=[v / 16384 if v is not None else None for v in r[3:6]],
                      angular_velocity_dps=[v / 131 if v is not None else None for v in r[6:9]]) for r in rows]
 
-    def dashboard_sessions(self, query="", state=None, limit=200):
-        # A pesquisa é feita no banco inteiro antes de limitar a lista visível.
-        rows = self.db.execute(
-            "SELECT device,session,received_first,received_last,state,start_json FROM sessions "
-            "WHERE (instr(device,?)>0 OR instr(session,?)>0) AND (? IS NULL OR state=?) "
-            "ORDER BY received_first DESC,device,session LIMIT ?",
-            (query.lower(), query.lower(), state, state, limit))
+    def dashboard_sessions(self, query="", state=None, limit=200, patient=None, device=None, day=None):
+        rows = self.db.execute("""
+            SELECT device,session,patient_id,received_first,received_last,state,start_json,end_seq,
+                (start_json IS NULL OR (end_seq IS NOT NULL AND (
+                    json_extract(end_json,'$.tx_dropped')>0 OR
+                    (SELECT count(*) FROM events e WHERE e.device=s.device AND e.session=s.session
+                     AND e.seq<=s.end_seq)!=end_seq+1 OR EXISTS
+                    (SELECT 1 FROM test_runs t WHERE t.device=s.device AND t.session=s.session
+                     AND t.finished_at IS NULL)))) AS incomplete
+            FROM sessions s
+            WHERE (instr(device,:query)>0 OR instr(session,:query)>0)
+              AND (:state IS NULL OR state=:state)
+              AND (:patient IS NULL OR coalesce(patient_id,'')=:patient)
+              AND (:device IS NULL OR device=:device)
+              AND (:day IS NULL OR date(received_first,'localtime')=:day)
+            ORDER BY received_first DESC,device,session LIMIT :limit""",
+            dict(query=query.lower(), state=state, patient=patient, device=device, day=day, limit=limit))
         return [dict(row) for row in rows]
 
     def trial_details(self, device, session):
