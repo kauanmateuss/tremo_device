@@ -1,8 +1,7 @@
-"""Resumo da sessão mais recente e do movimento medido pelo MPU 1."""
-import math
+"""Resumo da sessão mais recente e do movimento registrado pelos dois MPUs."""
 import pyqtgraph as pg
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFrame
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFrame, QComboBox
 from tremo_desktop.services.dashboard import STATES
 from .components import label, card, MetricCard, date_text, duration, number
 
@@ -14,14 +13,21 @@ class OverviewPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(28, 25, 28, 20)
         layout.setSpacing(18)
-        layout.addWidget(label("Olá!", "heading"))
+        header = QHBoxLayout()
+        header.addWidget(label("Olá!", "heading"), 1)
+        self.connection = label("", "badge")
+        header.addWidget(self.connection)
+        self.device_choice = QComboBox()
+        self.device_choice.setAccessibleName("Dispositivo na visão geral")
+        header.addWidget(self.device_choice)
+        layout.addLayout(header)
         layout.addWidget(label("Aqui está um resumo do estado do dispositivo e do paciente.", "muted"))
         identity = QFrame()
         identity.setObjectName("card")
         strip = QHBoxLayout(identity)
         strip.setContentsMargins(18, 14, 18, 14)
         self.identity = []
-        for icon, title in (("●", "Paciente da sessão"), ("▣", "Dispositivo"), ("▦", "Última sessão")):
+        for icon, title in (("●", "Paciente associado"), ("▣", "Dispositivo"), ("▦", "Última sessão")):
             strip.addWidget(self._icon(icon, "#e0f3f2", "#107b77"))
             column = QVBoxLayout()
             column.addWidget(label(title, "muted"))
@@ -30,7 +36,7 @@ class OverviewPanel(QWidget):
             column.addWidget(value)
             strip.addLayout(column, 1)
         layout.addWidget(identity)
-        self.metrics = self._cards(layout, ("Avaliações realizadas", "Sessões", "Aceleração RMS · MPU 1", "Sensores na sessão"))
+        self.metrics = self._cards(layout, ("Avaliações realizadas", "Sessões", "Aceleração RMS", "Sensores na sessão"))
         for metric, color in zip(self.metrics, ("#008f88", "#7969d9", "#239963", "#3980d5")):
             metric.setStyleSheet(f"QFrame#card {{ border-top: 3px solid {color}; }}")
         panels = QHBoxLayout()
@@ -56,7 +62,7 @@ class OverviewPanel(QWidget):
             scores.addLayout(column, 1)
         session.addLayout(scores)
         session.addStretch()
-        self.history = QPushButton("Ver histórico completo →")
+        self.history = QPushButton("Ver detalhes da última sessão →")
         session.addWidget(self.history)
         panels.addWidget(frame, 1)
         frame, movement = card()
@@ -65,7 +71,11 @@ class OverviewPanel(QWidget):
         self.plot.setLabel("bottom", "Tempo", units="s")
         self.plot.setLabel("left", "Aceleração", units="g")
         self.plot.showGrid(x=True, y=True, alpha=.15)
-        self.curve = self.plot.plot(pen=pg.mkPen("#0d938e", width=2), connect="finite")
+        self.plot.addLegend()
+        self.curves = {n: self.plot.plot(pen=pg.mkPen(color, width=2), name=f"MPU {n}", connect="finite")
+                       for n, color in ((1, "#0d938e"), (2, "#6555be"))}
+        self.collection = label("", "muted")
+        movement.addWidget(self.collection)
         movement.addWidget(self.plot)
         panels.addWidget(frame, 1)
         layout.addLayout(panels, 1)
@@ -93,7 +103,16 @@ class OverviewPanel(QWidget):
     def set_data(self, data):
         report = data["report"] if data else {}
         modules = report.get("modules", {})
-        values = (report.get("patient_id") or (data or {}).get("patient") or "—",
+        self.device_choice.blockSignals(True)
+        self.device_choice.clear()
+        self.device_choice.addItems((data or {}).get("devices", []))
+        self.device_choice.setCurrentText((data or {}).get("device", ""))
+        self.device_choice.blockSignals(False)
+        self.device_choice.setVisible(self.device_choice.count() > 1)
+        state = (data or {}).get("device_state")
+        self.connection.setText("Último estado da placa · " + (state or "desconhecido"))
+        self.history.setEnabled(bool(report))
+        values = ((data or {}).get("patient") or "Sem associação",
                   report.get("device") or (data or {}).get("device") or "—",
                   date_text(report["first_received_utc"], short=True) if report else "—")
         for widget, value in zip(self.identity, values):
@@ -101,16 +120,20 @@ class OverviewPanel(QWidget):
         sessions, runs = data["counts"] if data else (0, 0)
         self.metrics[0].set_value(str(runs))
         self.metrics[1].set_value(str(sessions))
-        rows = data["samples"] if data else []
-        rows = [r for r in rows if r[0] >= rows[-1][0] - 60_000_000]
-        valid = [r for r in rows if r[1]]
-        axes = [sum(r[i] for r in valid) / len(valid) for i in (2, 3, 4)] if valid else []
-        amplitudes = [math.dist(r[2:], axes) / 16384 if r[1] else math.nan for r in rows]
-        self.curve.setData([(r[0]-rows[-1][0])/1e6 for r in rows], amplitudes)
-        rms = math.sqrt(sum(a*a for a in amplitudes if math.isfinite(a))/len(valid)) if valid else None
-        self.metrics[2].set_value(number(rms, " g", 3), "Últimos 60 s · média por eixo removida")
+        for n, curve in self.curves.items():
+            curve.setData(*(data or {}).get("curves", {}).get(n, ([], [])))
+        rms = (data or {}).get("rms", {})
+        self.metrics[2].set_value(number(rms.get(1), " g", 3),
+                                  "MPU 1  ·  MPU 2: " + number(rms.get(2), " g", 3))
+        received = (data or {}).get("last_received")
+        status = (data or {}).get("monitoring", "Sem amostras")
+        self.collection.setText(status + (" · Última recepção " + date_text(received) if received else ""))
         sensors = modules.get("mpu")
-        self.metrics[3].set_value("—" if not sensors else "Com falhas" if any(sensors["errors"]) or not all(sensors["valid"]) else "Operacionais")
+        last_read = (data or {}).get("sensor_status", {})
+        summary = "Sem resumo"
+        if sensors:
+            summary = "Com falhas" if any(sensors["errors"]) or not all(sensors["valid"]) else "Operacionais"
+        self.metrics[3].set_value(summary, " · ".join(f"MPU {n}: {last_read.get(n, '—')}" for n in (1, 2)))
         self.state.setText(STATES.get(report.get("state"), "—") if report else "—")
         self.timing.setText(f"{values[2]}    ·    Duração {duration((report.get('timing') or {}).get('active_us'))}")
         for module in ("mot", "rti", "prm", "pal"):

@@ -1,5 +1,6 @@
 """Consultas da interface. Sem Qt: cada atualização usa sua própria conexão de leitura."""
 import json
+import math
 from pathlib import Path
 from tremo_desktop.storage.repository import Repository
 
@@ -12,7 +13,61 @@ MODULES = {"mot": "Localização de estímulos", "rti": "Tempo de reação",
            "prm": "Reconhecimento de padrões", "pal": "Associação de padrões"}
 
 
-def load_dashboard(path, selected=None, query="", state=None):
+def latest_overview(repository, device):
+    db = repository.db
+    devices = [row[0] for row in db.execute("SELECT device_id FROM devices ORDER BY updated_at DESC,device_id")]
+    if not devices:
+        return None
+    device = device if device in devices else devices[0]
+    association = db.execute("""SELECT d.state,p.patient_id FROM devices d
+        LEFT JOIN patient_devices p USING(device_id) WHERE d.device_id=?""", (device,)).fetchone()
+    state, patient = association
+    result = dict(device=device, devices=devices, patient=patient, device_state=state, report={},
+                  counts=(0, 0), curves={}, rms={}, sensor_status={}, last_received=None, monitoring="Sem amostras")
+    scope = (device, patient)
+    sessions = db.execute("""SELECT count(*), (SELECT count(*) FROM test_runs t JOIN sessions s
+        USING(device,session) WHERE device=? AND s.patient_id IS ? AND t.finished_at IS NOT NULL)
+        FROM sessions WHERE device=? AND patient_id IS ?""", (*scope, *scope)).fetchone()
+    result["counts"] = tuple(sessions)
+    recent = db.execute("""SELECT session FROM sessions WHERE device=? AND patient_id IS ?
+        ORDER BY received_first DESC,session DESC LIMIT 1""", scope).fetchone()
+    if not recent:
+        return result
+    key = (device, recent[0])
+    report = result["report"] = repository.overview(*key)
+    latest = db.execute("""SELECT t_us FROM samples WHERE device=? AND session=?
+        ORDER BY t_us DESC LIMIT 1""", key).fetchone()
+    if not latest:
+        return result
+    end_us = latest[0]
+    sample_ms = (report["configuration"] or {}).get("sample_ms", 40)
+    for sensor in (1, 2):
+        rows = repository.chart_samples(*key, sensor, after_us=max(0, end_us-60_000_000), limit=3001)
+        times, axes = plot_series(rows, "acceleration_g", end_us, sample_ms)
+        if rows:
+            result["sensor_status"][sensor] = "OK" if rows[-1]["valid"] else "falha"
+        valid = [r["acceleration_g"] for r in rows if r["valid"]]
+        if valid:
+            mean = [sum(axis)/len(valid) for axis in zip(*valid)]
+            amplitudes = [math.dist(point, mean) for point in zip(*axes)]
+            result["curves"][sensor] = (times, amplitudes)
+            result["rms"][sensor] = math.sqrt(sum(math.dist(point, mean)**2 for point in valid)/len(valid))
+    packet = db.execute("""SELECT received_at,seq FROM events WHERE device=? AND session=?
+        AND type='samples' ORDER BY t_us DESC,seq DESC LIMIT 1""", key).fetchone()
+    if packet:
+        result["last_received"] = packet[0]
+        finished = db.execute("""SELECT 1 FROM results WHERE device=? AND session=?
+            AND module='mpu' AND seq>?""", (*key, packet[1])).fetchone()
+        if report["timing"] or finished:
+            result["monitoring"] = "Coleta encerrada"
+        elif report["state"] == 2:
+            result["monitoring"] = "Sessão pausada"
+        else:
+            result["monitoring"] = "Coleta sem encerramento recebido"
+    return result
+
+
+def load_dashboard(path, selected=None, query="", state=None, overview_device=None):
     result = dict(sessions=[], selected=None, report=None, trials=[], samples={},
                   sample_counts={}, missing=not Path(path).is_file())
     if result["missing"]:
@@ -21,22 +76,9 @@ def load_dashboard(path, selected=None, query="", state=None):
     try:
         # Todas as consultas enxergam o mesmo instante, mesmo com coleta em paralelo.
         repository.db.execute("BEGIN")
-        recent = repository.dashboard_sessions(limit=1)
-        if recent:
-            key = (recent[0]["device"], recent[0]["session"])
-            report = repository.overview(*key)
-            counts = repository.db.execute("""SELECT count(*), (SELECT count(*) FROM test_runs t
-                JOIN sessions s USING(device,session) WHERE device=? AND s.patient_id IS ?)
-                FROM sessions WHERE device=? AND patient_id IS ?""",
-                (key[0], report["patient_id"], key[0], report["patient_id"])).fetchone()
-            samples = repository.db.execute("""SELECT t_us,valid,ax,ay,az FROM samples
-                WHERE device=? AND session=? AND sensor=1 ORDER BY t_us DESC LIMIT 3000""", key).fetchall()
-            result["latest"] = dict(report=report, counts=tuple(counts), samples=samples[::-1])
-        else:
-            device = repository.db.execute("""SELECT d.device_id,p.patient_id FROM devices d
-                LEFT JOIN patient_devices p USING(device_id) ORDER BY d.updated_at DESC LIMIT 1""").fetchone()
-            if device:
-                result["latest"] = dict(report={}, device=device[0], patient=device[1], counts=(0, 0), samples=[])
+        result["latest"] = latest_overview(repository, overview_device)
+        report = (result["latest"] or {}).get("report", {})
+        key = (report.get("device"), report.get("session"))
         sessions = repository.dashboard_sessions(query.strip(), state)
         for item in sessions:
             config = json.loads(item.pop("start_json") or "null")

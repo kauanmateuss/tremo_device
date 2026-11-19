@@ -102,7 +102,8 @@ class DashboardWindow(QMainWindow):
         horizontal.addWidget(sidebar)
         horizontal.addWidget(self.pages, 1)
         self.overview = OverviewPanel()
-        self.overview.history.clicked.connect(lambda: self.pages.setCurrentIndex(1))
+        self.overview.history.clicked.connect(self.open_latest)
+        self.overview.device_choice.currentIndexChanged.connect(self.invalidate)
         self.pages.addWidget(self.overview)
         history = QWidget()
         history_layout = QHBoxLayout(history)
@@ -210,6 +211,16 @@ class DashboardWindow(QMainWindow):
             self.pages.addWidget(scroll)
         self.statusBar().showMessage("Consultando banco local…")
 
+    def open_latest(self):
+        report = self.snapshot["latest"]["report"]
+        self.selected = (report["device"], report["session"])
+        self.search.setText(report["session"])
+        self.state_filter.setCurrentIndex(0)
+        self.debounce.stop()
+        self.pages.setCurrentIndex(1)
+        self.tabs.setCurrentIndex(2)
+        self.invalidate()
+
     @Slot()
     def invalidate(self):
         self.revision += 1
@@ -223,7 +234,8 @@ class DashboardWindow(QMainWindow):
             return
         self.busy = True
         self.requested.emit(self.revision, dict(path=self.path, selected=self.selected,
-                            query=self.search.text(), state=self.state_filter.currentData()))
+                            query=self.search.text(), state=self.state_filter.currentData(),
+                            overview_device=self.overview.device_choice.currentText()))
 
     def _selection_changed(self, current, previous):
         if current is not None:
@@ -302,7 +314,7 @@ class DashboardWindow(QMainWindow):
         self.results.set_data(data)
         self.tremor.set_data(data, reset=changed)
         self.details.set_data(data)
-        if changed:
+        if changed and self.tabs.currentIndex() != 2:
             self.tabs.setCurrentIndex(1 if config.get("kind") == 0 else 0)
 
     @Slot(int, str)

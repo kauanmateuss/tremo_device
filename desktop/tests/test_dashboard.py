@@ -69,6 +69,21 @@ class DashboardDataTests(unittest.TestCase):
         self.assertEqual(snapshot["report"]["state"], 3)
         self.assertEqual(load_dashboard(self.path)["report"]["state"], 5)
 
+    def test_overview_follows_current_association(self):
+        overview = load_dashboard(self.path)["latest"]
+        self.assertEqual(set(overview["curves"]), {1, 2})
+        self.assertTrue(overview["last_received"])
+        repo = Repository(self.path)
+        try:
+            repo.create_patient("PAC-NOVO")
+            repo.associate_patient_device("PAC-NOVO", overview["device"])
+        finally:
+            repo.close()
+        overview = load_dashboard(self.path)["latest"]
+        self.assertEqual(overview["patient"], "PAC-NOVO")
+        self.assertEqual(overview["counts"], (0, 0))
+        self.assertFalse(overview["report"])
+
     def test_gaps_invalid_values_and_shared_time(self):
         def sample(sequence, timestamp, valid=True):
             return dict(sequence=sequence, t_us=timestamp, valid=valid,

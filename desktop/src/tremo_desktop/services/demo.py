@@ -96,5 +96,6 @@ def populate_demo(path):
             with repository.db:
                 repository.db.execute("UPDATE sessions SET received_first=?,received_last=? WHERE device=? AND session=?",
                                       (received, received, device, session))
+        repository.associate_patient_device("PAC-DEMO", device)
     finally:
         repository.close()
