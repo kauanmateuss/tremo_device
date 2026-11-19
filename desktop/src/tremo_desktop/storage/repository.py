@@ -35,8 +35,10 @@ CREATE TABLE IF NOT EXISTS rejected_messages (
 CREATE TABLE IF NOT EXISTS devices (
  device_id TEXT PRIMARY KEY, firmware_version TEXT NOT NULL, state TEXT NOT NULL,
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS patients (
+ patient_id TEXT PRIMARY KEY, name TEXT, created_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS samples_time ON samples(device,session,sensor,t_us);
-PRAGMA user_version=2;
+PRAGMA user_version=3;
 """
 
 
@@ -61,7 +63,7 @@ class Repository:
         try:
             self.db.execute("PRAGMA foreign_keys=ON")
             version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in ((1, 2) if read_only else (0, 1, 2)):
+            if version not in ((1, 2, 3) if read_only else (0, 1, 2, 3)):
                 raise RuntimeError("Versão do banco não suportada")
             if not read_only:
                 self.db.execute("PRAGMA journal_mode=WAL")
@@ -74,6 +76,13 @@ class Repository:
                         "CREATE TABLE IF NOT EXISTS devices ("
                         " device_id TEXT PRIMARY KEY, firmware_version TEXT NOT NULL, state TEXT NOT NULL,"
                         " created_at TEXT NOT NULL, updated_at TEXT NOT NULL);"
+                        "COMMIT;"
+                    )
+                elif version == 2:
+                    self.db.executescript(
+                        "BEGIN;"
+                        "CREATE TABLE IF NOT EXISTS patients ("
+                        " patient_id TEXT PRIMARY KEY, name TEXT, created_at TEXT NOT NULL);"
                         "COMMIT;"
                     )
         except Exception:
