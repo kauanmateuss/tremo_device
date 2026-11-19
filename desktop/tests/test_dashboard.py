@@ -33,11 +33,11 @@ class DashboardDataTests(unittest.TestCase):
             repository.close()
         other = self.path.parent / "unsupported.sqlite3"
         with sqlite3.connect(other) as db:
-            db.execute("PRAGMA user_version=2")
+            db.execute("PRAGMA user_version=99")
         with self.assertRaisesRegex(RuntimeError, "Versão"):
             load_dashboard(other)
         with sqlite3.connect(other) as db:
-            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 2)
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 99)
 
     def test_selection_filter_metrics_and_losses(self):
         data = load_dashboard(self.path)
