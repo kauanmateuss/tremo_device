@@ -120,7 +120,7 @@ void communication_init(void) {
     bool configured = TREMO_WIFI_SSID[0] != 0;
     telemetry_init(device, configured);
     patient_assoc_init();
-    snprintf(assoc.device_id, sizeof(assoc.device_id), "%s", device);
+    patient_assoc_set_device_id(device);
     if (!configured) return;
     snprintf(client_id, sizeof(client_id), "tremo-%s", device);
     snprintf(topic, sizeof(topic), "tremo/v1/devices/%s/events", device);

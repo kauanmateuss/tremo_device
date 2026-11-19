@@ -26,6 +26,9 @@ typedef struct {
 // Inicializa o modulo de associacao
 void patient_assoc_init(void);
 
+// Define o ID do dispositivo (chamado pelo communication)
+void patient_assoc_set_device_id(const char *device_id);
+
 // Retorna o estado atual da associacao
 patient_assoc_state_t patient_assoc_state(void);
 

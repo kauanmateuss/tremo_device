@@ -14,6 +14,7 @@
 #include "assessment.h"
 #include "communication.h"
 #include "evaluation.h"
+#include "patient_assoc.h"
 
 #define WELCOME_MS 2000
 #define DISPLAY_MS 200
@@ -26,6 +27,12 @@ static int preparing_test = -1;
 static bool capturing_cognitive;
 static const app_state_t cognitive_states[] = {APP_MOT, APP_RTI, APP_PRM, APP_PAL};
 static communication_status_t ready_network;
+static char device_id_str[17];
+
+static void show_device_menu(void);
+static void show_device_info(void);
+static void show_sessions(void);
+static void show_session_active(void);
 
 static void draw_ready(void) {
     static const char *const labels[] = {
@@ -46,12 +53,7 @@ static uint32_t now_ms(void) {
 }
 
 static void show_menu(void) {
-    const char *options[] = {"1 TREMORES", "2 COGNITIVA", "3 COMPLETA", "4 CONFIG INFO"};
-    char rows[4][16];
-    const char *lines[] = {"MENU PRINCIPAL", "", rows[0], rows[1], rows[2], rows[3], "", "A OK  B VOLTAR"};
-    for (unsigned int i = 0; i < 4; ++i)
-        snprintf(rows[i], sizeof(rows[i]), "%c%s", menu_option == i ? '-' : ' ', options[i]);
-    display_show_lines(lines, 8);
+    show_device_menu();
 }
 
 static void show_cognitive_menu(void) {
@@ -89,6 +91,74 @@ static void show_config(void) {
     const char *lines[] = {"CONFIGURACOES", rows[config_option], rows[(config_option + 1) % 8], rows[(config_option + 2) % 8], "ALTERA PRIMEIRA", "A ALTERAR", "B MENU", "CLIQUE PAUSA"};
     display_show_lines(lines, 8);
 }
+static void show_device_menu(void) {
+    const char *options[] = {"1 AVAL COMPLETA", "2 AVAL INDIVIDUAL", "3 SESSOES", "4 INFO DISPOSITIVO"};
+    char rows[4][16];
+    const char *lines[] = {"MENU PRINCIPAL", "", rows[0], rows[1], rows[2], rows[3], "", "A OK  B VOLTAR"};
+    for (unsigned int i = 0; i < 4; ++i)
+        snprintf(rows[i], sizeof(rows[i]), "%c%s", menu_option == i ? '-' : ' ', options[i]);
+    display_show_lines(lines, 8);
+}
+
+static void show_device_info(void) {
+    char rows[8][24];
+    snprintf(rows[0], sizeof(rows[0]), "ID: %s", device_id_str);
+    if (app_has_patient()) {
+        snprintf(rows[1], sizeof(rows[1]), "Paciente: %s", app_patient_id());
+    } else {
+        snprintf(rows[1], sizeof(rows[1]), "Paciente: NAO VINCULADO");
+    }
+    communication_status_t net = communication_status();
+    const char *net_str;
+    switch (net) {
+    case COMM_ONLINE: net_str = "MQTT ONLINE"; break;
+    case COMM_BROKER_WAIT: net_str = "MQTT AGUARDANDO"; break;
+    case COMM_WIFI_WAIT: net_str = "WIFI CONECTANDO"; break;
+    case COMM_WIFI_NOT_FOUND: net_str = "REDE NAO ENCONTRADA"; break;
+    case COMM_WIFI_BAD_AUTH: net_str = "SENHA WIFI INVALIDA"; break;
+    case COMM_WIFI_NO_IP: net_str = "WIFI SEM IP"; break;
+    default: net_str = "SEM RADIO"; break;
+    }
+    snprintf(rows[2], sizeof(rows[2]), "%s", net_str);
+    snprintf(rows[3], sizeof(rows[3]), "MPU1: %s", monitoring_sensor_ready(0) ? "OK" : "FALHA");
+    snprintf(rows[4], sizeof(rows[4]), "MPU2: %s", monitoring_sensor_ready(1) ? "OK" : "FALHA");
+    const char *lines[] = {"INFO DISPOSITIVO", rows[0], rows[1], rows[2], rows[3], rows[4], "", "B VOLTAR"};
+    display_show_lines(lines, 8);
+}
+
+static void show_sessions(void) {
+    const session_t *s = session_current();
+    char state_str[16];
+    switch (s->state) {
+    case SESSION_IDLE: snprintf(state_str, sizeof(state_str), "OCIOSA"); break;
+    case SESSION_RUNNING: snprintf(state_str, sizeof(state_str), "ATIVA"); break;
+    case SESSION_PAUSED: snprintf(state_str, sizeof(state_str), "PAUSADA"); break;
+    case SESSION_COMPLETE: snprintf(state_str, sizeof(state_str), "CONCLUIDA"); break;
+    case SESSION_INTERRUPTED: snprintf(state_str, sizeof(state_str), "INTERROMPIDA"); break;
+    default: snprintf(state_str, sizeof(state_str), "ERRO"); break;
+    }
+    char id_str[24];
+    snprintf(id_str, sizeof(id_str), "ID: %016llx", (unsigned long long)s->id);
+    const char *patient = app_has_patient() ? app_patient_id() : "NENHUM";
+    const char *lines[] = {"SESSOES", id_str, patient, state_str, "TESTES: --", "DURACAO: --", "A INICIAR", "B VOLTAR"};
+    display_show_lines(lines, 8);
+}
+
+static void show_session_active(void) {
+    const session_t *s = session_current();
+    uint64_t active = session_active_us(time_us_64());
+    unsigned minutes = (unsigned)(active / 60000000ULL);
+    unsigned seconds = (unsigned)((active % 60000000ULL) / 1000000ULL);
+    char id_str[24];
+    snprintf(id_str, sizeof(id_str), "ID: %016llx", (unsigned long long)s->id);
+    const char *patient = app_has_patient() ? app_patient_id() : "NENHUM";
+    const char *state_str = s->state == SESSION_RUNNING ? "ATIVA" : s->state == SESSION_PAUSED ? "PAUSADA" : "ENCERRADA";
+    char time_str[16];
+    snprintf(time_str, sizeof(time_str), "%02u:%02u", minutes, seconds);
+    const char *lines[] = {"SESSAO ATIVA", id_str, patient, state_str, time_str, "TESTES: --", "B ENCERRAR", "JOY VOLTAR"};
+    display_show_lines(lines, 8);
+}
+
 static void show_evaluation_results(void) {
     const evaluation_t *e = evaluation_current();
     const char *names[] = {"MOT", "RTI", "PRM", "PAL", "MPU"};
@@ -212,6 +282,12 @@ static void enter_state(app_state_t next) {
     }
     case APP_INFO:
         show_config(); break;
+    case APP_DEVICE_INFO:
+        show_device_info(); break;
+    case APP_SESSIONS:
+        show_sessions(); break;
+    case APP_SESSION_ACTIVE:
+        show_session_active(); break;
     }
 }
 
@@ -280,9 +356,22 @@ static void record_cognitive_step(bool sensor_error) {
     else { display_draw_text("A PROX B FIM   ", 5, 56); display_render(); }
 }
 
+const char *app_device_id(void) {
+    return patient_assoc_device_id();
+}
+
+const char *app_patient_id(void) {
+    return patient_assoc_patient_id();
+}
+
+bool app_has_patient(void) {
+    return patient_assoc_has_patient();
+}
+
 void app_init(void) {
     evaluation_cancel(false);
     communication_init();
+    patient_assoc_init();
     session_init(get_rand_32());
     controls_init();
     display_init();
@@ -292,6 +381,8 @@ void app_init(void) {
     menu_option = cognitive_option = config_option = 0;
     preparing_test = -1;
     capturing_cognitive = false;
+    // Copia o ID do dispositivo para exibicao
+    snprintf(device_id_str, sizeof(device_id_str), "%s", patient_assoc_device_id());
     enter_state(APP_WELCOME);
 }
 
@@ -352,11 +443,11 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
     case APP_MENU:
         if (event == CONTROL_UP) { menu_option = (menu_option + 3) % 4; show_menu(); }
         else if (event == CONTROL_DOWN) { menu_option = (menu_option + 1) % 4; show_menu(); }
-        else if (event == CONTROL_CONFIRM && menu_option == 2) launch_evaluation(true);
         else if (event == CONTROL_CONFIRM) {
-            enter_state(menu_option == 0 ? APP_INSTRUCTIONS :
-                        menu_option == 1 ? APP_COG_MENU :
-                        menu_option == 3 ? APP_INFO : APP_UNAVAILABLE);
+            if (menu_option == 0) launch_evaluation(true);
+            else if (menu_option == 1) enter_state(APP_COG_MENU);
+            else if (menu_option == 2) enter_state(APP_SESSIONS);
+            else if (menu_option == 3) enter_state(APP_DEVICE_INFO);
         }
         break;
     case APP_INSTRUCTIONS:
@@ -474,6 +565,16 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
             else c.cognitive_mpu = !c.cognitive_mpu;
             session_configure(c); show_config();
         } else if (event == CONTROL_BACK) enter_state(APP_MENU);
+        break;
+    case APP_DEVICE_INFO:
+        if (event == CONTROL_BACK) enter_state(APP_MENU);
+        break;
+    case APP_SESSIONS:
+        if (event == CONTROL_CONFIRM) enter_state(APP_SESSION_ACTIVE);
+        else if (event == CONTROL_BACK) enter_state(APP_MENU);
+        break;
+    case APP_SESSION_ACTIVE:
+        if (event == CONTROL_BACK) enter_state(APP_MENU);
         break;
     case APP_UNAVAILABLE:
         if (event == CONTROL_BACK) enter_state(APP_MENU);

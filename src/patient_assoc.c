@@ -9,6 +9,13 @@ void patient_assoc_init(void) {
     assoc.device_id[0] = '\0';
 }
 
+void patient_assoc_set_device_id(const char *device_id) {
+    if (device_id) {
+        strncpy(assoc.device_id, device_id, PATIENT_ID_MAX);
+        assoc.device_id[PATIENT_ID_MAX] = '\0';
+    }
+}
+
 patient_assoc_state_t patient_assoc_state(void) {
     return assoc.state;
 }

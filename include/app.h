@@ -7,7 +7,8 @@ typedef enum {
     APP_WELCOME, APP_MENU, APP_INSTRUCTIONS, APP_PREPARING,
     APP_READY, APP_SENSOR_ERROR, APP_ACQUIRING, APP_STOP_CONFIRM,
     APP_RESULTS, APP_UNAVAILABLE, APP_INFO, APP_COG_MENU, APP_MOT,
-    APP_COG_UNAVAILABLE, APP_MOT_ERROR, APP_RTI, APP_RTI_ERROR, APP_PRM, APP_PRM_ERROR, APP_PAL, APP_PAL_ERROR, APP_PAUSED, APP_CALIBRATING, APP_CAL_ERROR, APP_EVAL_SETUP, APP_EVAL_RESULTS
+    APP_COG_UNAVAILABLE, APP_MOT_ERROR, APP_RTI, APP_RTI_ERROR, APP_PRM, APP_PRM_ERROR, APP_PAL, APP_PAL_ERROR, APP_PAUSED, APP_CALIBRATING, APP_CAL_ERROR, APP_EVAL_SETUP, APP_EVAL_RESULTS,
+    APP_DEVICE_INFO, APP_SESSIONS, APP_SESSION_ACTIVE
 } app_state_t;
 
 void app_init(void);
@@ -18,5 +19,11 @@ void app_update_captured(control_event_t event, control_button_state_t button,
                          uint64_t event_us, uint64_t now_us);
 // Útil para depuração e testes das transições.
 app_state_t app_get_state(void);
+// Retorna o ID unico do dispositivo (16 chars hex).
+const char *app_device_id(void);
+// Retorna o ID do paciente associado (ou string vazia se nenhum).
+const char *app_patient_id(void);
+// Indica se ha um paciente associado.
+bool app_has_patient(void);
 
 #endif
