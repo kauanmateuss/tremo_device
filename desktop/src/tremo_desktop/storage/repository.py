@@ -8,10 +8,11 @@ from tremo_desktop.transport.protocol import InvalidMessage
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
- device TEXT NOT NULL, session TEXT NOT NULL, received_first TEXT NOT NULL,
- received_last TEXT NOT NULL, start_json TEXT, end_json TEXT, state INTEGER,
- state_seq INTEGER NOT NULL DEFAULT -1, end_seq INTEGER,
- PRIMARY KEY(device,session));
+ device TEXT NOT NULL, session TEXT NOT NULL, patient_id TEXT,
+ received_first TEXT NOT NULL, received_last TEXT NOT NULL, start_json TEXT,
+ end_json TEXT, state INTEGER, state_seq INTEGER NOT NULL DEFAULT -1,
+ end_seq INTEGER, PRIMARY KEY(device,session),
+ FOREIGN KEY(patient_id) REFERENCES patients(patient_id));
 CREATE TABLE IF NOT EXISTS events (
  device TEXT NOT NULL, session TEXT NOT NULL, seq INTEGER NOT NULL, type TEXT NOT NULL,
  t_us INTEGER NOT NULL, payload TEXT NOT NULL, received_at TEXT NOT NULL,
@@ -43,7 +44,7 @@ CREATE TABLE IF NOT EXISTS patient_devices (
  FOREIGN KEY(patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE,
  FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE);
 CREATE INDEX IF NOT EXISTS samples_time ON samples(device,session,sensor,t_us);
-PRAGMA user_version=4;
+PRAGMA user_version=5;
 """
 
 
@@ -68,7 +69,7 @@ class Repository:
         try:
             self.db.execute("PRAGMA foreign_keys=ON")
             version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in ((1, 2, 3, 4) if read_only else (0, 1, 2, 3, 4)):
+            if version not in ((1, 2, 3, 4, 5) if read_only else (0, 1, 2, 3, 4, 5)):
                 raise RuntimeError("Versão do banco não suportada")
             if not read_only:
                 self.db.execute("PRAGMA journal_mode=WAL")
@@ -98,6 +99,12 @@ class Repository:
                         " PRIMARY KEY(patient_id, device_id),"
                         " FOREIGN KEY(patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE,"
                         " FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE);"
+                        "COMMIT;"
+                    )
+                elif version == 4:
+                    self.db.executescript(
+                        "BEGIN;"
+                        "ALTER TABLE sessions ADD COLUMN patient_id TEXT REFERENCES patients(patient_id);"
                         "COMMIT;"
                     )
         except Exception:
