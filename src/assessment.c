@@ -39,7 +39,7 @@ void assessment_begin(unsigned test) {
 static bool pause_if_safe(void) {
     if (!session_current()->pause_requested || !safe_boundary()) return false;
     display_save_screen();
-    const char *lines[] = {"SESSAO PAUSADA", "", "A CONTINUAR", "B ENCERRAR"};
+    const char *lines[] = {"TESTE PAUSADO", "", "A CONTINUAR", "B PARAR TESTE"};
     session_pause(time_us_64());
     if (session_current()->config.cognitive_mpu)
         monitoring_pause(to_ms_since_boot(get_absolute_time()));

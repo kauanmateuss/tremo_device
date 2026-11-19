@@ -163,6 +163,10 @@ class Repository:
                 if e["type"] == "end":
                     self.db.execute("UPDATE sessions SET end_json=?,end_seq=? WHERE device=? AND session=?", (encoded(d), e["seq"], *key))
                 elif e["type"] == "trial":
+                    # O início pode estar atrasado ou ausente. A identidade continua a mesma.
+                    self.db.execute("""INSERT INTO test_runs(device,session,module,run_number,state)
+                        VALUES(?,?,?,?,'em_andamento') ON CONFLICT(device,session,module,run_number)
+                        DO NOTHING""", (*key, d["module"], run or 1))
                     latency = d["reaction_us"] if d["module"] == "rti" else (d["elapsed_us"] if d["outcome"] in (0, 1) else None)
                     self.db.execute("INSERT INTO trials VALUES(?,?,?,?,?,?,?,?,?)", (*key, d["module"], d["index"], d["training"], d["outcome"], latency, encoded(d), run))
                 elif e["type"] == "test_start":
@@ -262,8 +266,12 @@ class Repository:
         return [dict(row) for row in rows]
 
     def trial_details(self, device, session):
-        return [dict(json.loads(row[0]), run=row[1] or 1) for row in self.db.execute(
-            "SELECT data,run FROM trials WHERE device=? AND session=? ORDER BY run,module,trial_index",
+        return [dict(json.loads(row["data"]), run=row["run"] or 1, test_run_id=row["test_run_id"])
+                for row in self.db.execute("""
+            SELECT t.data,t.run,r.run_id AS test_run_id FROM trials t
+            LEFT JOIN test_runs r ON r.device=t.device AND r.session=t.session AND r.module=t.module
+                AND r.run_number=coalesce(nullif(t.run,0),1)
+            WHERE t.device=? AND t.session=? ORDER BY t.run,t.module,t.trial_index""",
             (device, session))]
 
     def sample_counts(self, device, session):
@@ -345,5 +353,5 @@ class Repository:
 
     def test_runs_by_session(self, device, session):
         return [dict(row) for row in self.db.execute(
-            "SELECT run_id, device, session, module, run_number, started_at, finished_at, state, data "
+            "SELECT run_id, run_id AS test_run_id, device, session, module, run_number, started_at, finished_at, state, data "
             "FROM test_runs WHERE device=? AND session=? ORDER BY run_number, module", (device, session))]

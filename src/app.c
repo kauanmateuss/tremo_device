@@ -26,17 +26,10 @@ static uint32_t welcome_started_ms, last_display_ms;
 static bool matrix_ready;
 static int preparing_test = -1;
 static bool capturing_cognitive, counted_test, full_evaluation;
-static bool manual_session_open(void) {
-    return session_is_open() && session_current()->kind == SESSION_MANUAL;
-}
-static bool begin_session(session_kind_t kind) {
+static bool begin_session(void) {
     char patient[PATIENT_ID_MAX + 1];
     patient_assoc_copy(patient);
-    return session_begin_patient(kind, time_us_64(), patient);
-}
-static void finish_automatic(session_state_t reason) {
-    if (!manual_session_open()) session_finish(reason, time_us_64());
-    else if (session_current()->state == SESSION_PAUSED) session_resume(time_us_64());
+    return session_begin_patient(SESSION_MANUAL, time_us_64(), patient);
 }
 static const app_state_t cognitive_states[] = {APP_MOT, APP_RTI, APP_PRM, APP_PAL};
 static communication_status_t ready_network;
@@ -170,7 +163,7 @@ static void show_evaluation_results(void) {
         if (i < e->count) snprintf(rows[i], sizeof(rows[i]), "%s %s", names[e->steps[i].module], status[e->steps[i].status]);
         else rows[i][0] = 0;
     }
-    const char *lines[] = {"RESUMO AVALIACAO", manual_session_open() ? "SESSAO ABERTA" : session_current()->state == SESSION_COMPLETE ? "CONCLUIDA" : "ENCERRADA",
+    const char *lines[] = {"RESUMO AVALIACAO", "SESSAO ABERTA",
         rows[0], rows[1], rows[2], rows[3], rows[4], "A OU B MENU"};
     display_show_lines(lines, 8);
     if (stdio_usb_connected()) {
@@ -183,8 +176,6 @@ static void show_evaluation_results(void) {
 }
 
 static void begin_cognitive(unsigned test) {
-    const session_kind_t kinds[] = {SESSION_MOT, SESSION_RTI, SESSION_PRM, SESSION_PAL};
-    if (!evaluation_current()->active && !manual_session_open()) begin_session(kinds[test]);
     telemetry_next_run();
     counted_test = false;
     static const char *const modules[] = {"mot", "rti", "prm", "pal"};
@@ -244,7 +235,7 @@ static void enter_state(app_state_t next) {
         last_display_ms = now_ms() - DISPLAY_MS;
         break;
     case APP_STOP_CONFIRM: {
-        const char *lines[] = {"ENCERRAR", "A SESSAO", "", "COLETA CONTINUA", "", "A ENCERRAR", "B CONTINUAR"};
+        const char *lines[] = {"ENCERRAR", "A COLETA", "", "COLETA CONTINUA", "", "A ENCERRAR", "B CONTINUAR"};
         display_show_lines(lines, 7);
         break;
     }
@@ -284,7 +275,7 @@ static void enter_state(app_state_t next) {
     case APP_EVAL_RESULTS:
         show_evaluation_results(); break;
     case APP_PAUSED: {
-        const char *lines[] = {"SESSAO PAUSADA", "", "A CONTINUAR", "B ENCERRAR"};
+        const char *lines[] = {"COLETA PAUSADA", "", "A CONTINUAR", "B PARAR COLETA"};
         display_show_lines(lines, 4); break;
     }
     case APP_INFO:
@@ -303,24 +294,23 @@ static void enter_state(app_state_t next) {
     }
 }
 
-static void evaluation_end(session_state_t reason);
-static void finish_session(monitoring_end_t reason) {
+static void evaluation_end(step_status_t outcome);
+static void finish_monitoring(monitoring_end_t reason) {
     monitoring_stop(now_ms(), reason);
     reason = monitoring_result()->reason;
+    if (session_current()->state == SESSION_PAUSED) session_resume(time_us_64());
     session_record_test();
-    if (!evaluation_current()->active) finish_automatic(reason == MONITORING_COMPLETE ? SESSION_COMPLETE : reason == MONITORING_INTERRUPTED ? SESSION_INTERRUPTED : SESSION_ERROR);
     if (evaluation_current()->active) {
         evaluation_record(reason == MONITORING_COMPLETE ? STEP_COMPLETE : reason == MONITORING_INTERRUPTED ? STEP_INTERRUPTED : STEP_ERROR, 0, 0, 0);
-        if (reason != MONITORING_COMPLETE) { evaluation_end(reason == MONITORING_INTERRUPTED ? SESSION_INTERRUPTED : SESSION_ERROR); return; }
+        if (reason != MONITORING_COMPLETE) { evaluation_end(reason == MONITORING_INTERRUPTED ? STEP_INTERRUPTED : STEP_ERROR); return; }
     }
     enter_state(APP_RESULTS);
     if (evaluation_current()->active) { display_draw_text("A PROX B FIM   ", 5, 56); display_render(); }
 }
 
-static void evaluation_end(session_state_t reason) {
+static void evaluation_end(step_status_t outcome) {
     preparing_test = -1;
-    if (reason != SESSION_COMPLETE) evaluation_cancel(reason == SESSION_ERROR);
-    finish_automatic(reason);
+    if (outcome != STEP_COMPLETE) evaluation_cancel(outcome == STEP_ERROR);
     enter_state(APP_EVAL_RESULTS);
 }
 static void launch_cognitive(unsigned test) {
@@ -333,7 +323,7 @@ static void launch_cognitive(unsigned test) {
 static void leave_preparation(void) {
     if (preparing_test >= 0) {
         preparing_test = -1;
-        if (evaluation_current()->active) evaluation_end(SESSION_INTERRUPTED);
+        if (evaluation_current()->active) evaluation_end(STEP_INTERRUPTED);
         else enter_state(APP_COG_MENU);
     } else enter_state(APP_INSTRUCTIONS);
 }
@@ -346,17 +336,16 @@ static void launch_step(void) {
 }
 static void launch_evaluation(bool full) {
     if (!matrix_ready) { enter_state(APP_MOT_ERROR); return; }
-    if (!manual_session_open() && !begin_session(full ? SESSION_FULL : SESSION_BATTERY)) return;
     if (evaluation_begin(full, session_current())) {
         full_evaluation = full;
         enter_state(APP_EVAL_SETUP);
     }
 }
 static void evaluation_continue(control_event_t event) {
-    if (event == CONTROL_BACK) evaluation_end(SESSION_INTERRUPTED);
+    if (event == CONTROL_BACK) evaluation_end(STEP_INTERRUPTED);
     else if (event == CONTROL_CONFIRM) {
         if (evaluation_next()) launch_step();
-        else evaluation_end(SESSION_COMPLETE);
+        else evaluation_end(STEP_COMPLETE);
     }
 }
 static void record_cognitive_step(bool sensor_error) {
@@ -367,8 +356,8 @@ static void record_cognitive_step(bool sensor_error) {
     case 2: evaluation_record(sensor_error ? STEP_ERROR : assessment_interrupted() ? STEP_INTERRUPTED : STEP_COMPLETE, prm_result()->correct, prm_result()->wrong, prm_result()->omissions); break;
     case 3: evaluation_record(sensor_error ? STEP_ERROR : assessment_interrupted() ? STEP_INTERRUPTED : pal_result()->limit_reached ? STEP_LIMIT : STEP_COMPLETE, pal_result()->correct, pal_result()->wrong, pal_result()->omissions); break;
     }
-    if (sensor_error) evaluation_end(SESSION_ERROR);
-    else if (assessment_interrupted()) evaluation_end(SESSION_INTERRUPTED);
+    if (sensor_error) evaluation_end(STEP_ERROR);
+    else if (assessment_interrupted()) evaluation_end(STEP_INTERRUPTED);
     else { display_draw_text("A PROX B FIM   ", 5, 56); display_render(); }
 }
 
@@ -408,7 +397,6 @@ static void report_cognitive_sensor_error(void) {
     if (evaluation_current()->active) {
         record_cognitive_step(true);
     } else {
-        finish_automatic(SESSION_ERROR);
         const char *lines[] = {"FALHA MPU", "TESTE ENCERRADO", "", "VER SERIAL USB", "A OU B VOLTAR"};
         display_show_lines(lines, 5);
     }
@@ -442,7 +430,6 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
                 }
             }
             if (evaluation_current()->active) record_cognitive_step(false);
-            else finish_automatic(assessment_interrupted() ? SESSION_INTERRUPTED : SESSION_COMPLETE);
         }
         if (leave) enter_state(APP_COG_MENU);
         return;
@@ -464,21 +451,22 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         if (event == CONTROL_UP) { menu_option = (menu_option + 3) % 4; show_menu(); }
         else if (event == CONTROL_DOWN) { menu_option = (menu_option + 1) % 4; show_menu(); }
         else if (event == CONTROL_CONFIRM) {
-            if (menu_option == 0) launch_evaluation(true);
+            if (menu_option <= 1 && !session_is_open()) enter_state(APP_SESSIONS);
+            else if (menu_option == 0) launch_evaluation(true);
             else if (menu_option == 1) enter_state(APP_COG_MENU);
-            else if (menu_option == 2) enter_state(manual_session_open() ? APP_SESSION_ACTIVE : APP_SESSIONS);
+            else if (menu_option == 2) enter_state(session_is_open() ? APP_SESSION_ACTIVE : APP_SESSIONS);
             else if (menu_option == 3) enter_state(APP_DEVICE_INFO);
         }
         break;
     case APP_INSTRUCTIONS:
-        if (event == CONTROL_BACK) { if (evaluation_current()->active) evaluation_end(SESSION_INTERRUPTED); else enter_state(APP_MENU); }
+        if (event == CONTROL_BACK) { if (evaluation_current()->active) evaluation_end(STEP_INTERRUPTED); else enter_state(APP_MENU); }
         else if (event == CONTROL_CONFIRM) enter_state(APP_PREPARING);
         break;
     case APP_PREPARING:
         if (event == CONTROL_BACK) leave_preparation();
         else if (monitoring_prepare()) {
             monitoring_calibration_begin(now_ms()); enter_state(APP_CALIBRATING);
-        } else if (evaluation_current()->active) evaluation_end(SESSION_ERROR);
+        } else if (evaluation_current()->active) evaluation_end(STEP_ERROR);
         else enter_state(APP_SENSOR_ERROR);
         break;
     case APP_CALIBRATING:
@@ -487,7 +475,7 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
             calibration_state_t c = monitoring_calibration_update(now);
             if (c == CAL_OK) enter_state(APP_READY);
             else if (c == CAL_MOVING) enter_state(APP_CAL_ERROR);
-            else if (c == CAL_SENSOR_ERROR) { if (evaluation_current()->active) evaluation_end(SESSION_ERROR); else enter_state(APP_SENSOR_ERROR); }
+            else if (c == CAL_SENSOR_ERROR) { if (evaluation_current()->active) evaluation_end(STEP_ERROR); else enter_state(APP_SENSOR_ERROR); }
         }
         break;
     case APP_CAL_ERROR:
@@ -502,7 +490,6 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
             preparing_test = -1;
             enter_state(cognitive_states[test]);
         } else if (event == CONTROL_CONFIRM) {
-            if (!evaluation_current()->active && !manual_session_open()) begin_session(SESSION_TREMOR);
             telemetry_next_run();
             monitoring_start(now_ms());
             enter_state(APP_ACQUIRING);
@@ -515,11 +502,11 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
     case APP_ACQUIRING:
     case APP_STOP_CONFIRM:
         if (state == APP_STOP_CONFIRM && event == CONTROL_CONFIRM) {
-            finish_session(MONITORING_INTERRUPTED);
+            finish_monitoring(MONITORING_INTERRUPTED);
             break;
         }
         if (monitoring_elapsed_ms(now) >= session_current()->config.duration_ms) {
-            finish_session(MONITORING_COMPLETE);
+            finish_monitoring(MONITORING_COMPLETE);
             break;
         }
         if (event == CONTROL_PAUSE || session_current()->pause_requested) {
@@ -527,20 +514,20 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         }
         if (event == CONTROL_BACK)
             enter_state(state == APP_ACQUIRING ? APP_STOP_CONFIRM : APP_ACQUIRING);
-        if (!monitoring_update(now)) { finish_session(MONITORING_SENSOR_ERROR); break; }
+        if (!monitoring_update(now)) { finish_monitoring(MONITORING_SENSOR_ERROR); break; }
         if (state == APP_ACQUIRING && now - last_display_ms >= DISPLAY_MS) {
             monitoring_draw();
             last_display_ms = now;
         }
         break;
     case APP_PAUSED:
-        if (event == CONTROL_BACK) finish_session(MONITORING_INTERRUPTED);
+        if (event == CONTROL_BACK) finish_monitoring(MONITORING_INTERRUPTED);
         else if (event == CONTROL_CONFIRM) {
             session_resume(time_us_64()); monitoring_resume(now); enter_state(APP_ACQUIRING);
         }
         break;
     case APP_EVAL_SETUP:
-        if (event == CONTROL_BACK) evaluation_end(SESSION_INTERRUPTED);
+        if (event == CONTROL_BACK) evaluation_end(STEP_INTERRUPTED);
         else if (event == CONTROL_CONFIRM) launch_step();
         break;
     case APP_EVAL_RESULTS:
@@ -596,7 +583,7 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         else if (event == CONTROL_BACK) enter_state(APP_MENU);
         break;
     case APP_SESSIONS:
-        if (event == CONTROL_CONFIRM && begin_session(SESSION_MANUAL)) {
+        if (event == CONTROL_CONFIRM && begin_session()) {
             enter_state(APP_SESSION_ACTIVE);
         } else if (event == CONTROL_PAUSE || event == CONTROL_BACK) enter_state(APP_MENU);
         break;

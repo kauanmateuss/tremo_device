@@ -88,7 +88,20 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(report["quality"]["complete"])
         self.assertEqual(report["patient_id"], "PAC-A")
         self.assertEqual([r["run_number"] for r in report["runs"]], [1, 2])
-        self.assertEqual([t["run"] for t in self.repo.trial_details(DEVICE, SESSION)], [1, 2])
+        ids = [r["test_run_id"] for r in report["runs"]]
+        self.assertEqual(len(set(ids)), 2)
+        self.assertEqual([t["test_run_id"] for t in self.repo.trial_details(DEVICE, SESSION)], ids)
+
+    def test_late_start_keeps_run_identity(self):
+        self.put(dict(trial(0), run=4, seq=2))
+        run_id = self.repo.trial_details(DEVICE, SESSION)[0]["test_run_id"]
+        self.assertIsNotNone(run_id)
+        self.put(dict(result(3, records=1, correct=1, wrong=0), run=4))
+        self.put(dict(event("test_start", 1, {"module": "mot"}), run=4))
+        run, = self.repo.test_runs_by_session(DEVICE, SESSION)
+        self.assertEqual(run["test_run_id"], run_id)
+        self.assertEqual(run["state"], "concluida")
+        self.assertIsNotNone(run["started_at"])
 
     def test_metrics_exclude_training_and_detect_missing(self):
         for e in (event(), trial(0, True), trial(1), trial(2, outcome=1), result(4), end(5)):
@@ -168,6 +181,9 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(report["modules"]["mpu"]["received_valid"], [750, 750])
         self.assertEqual(report["modules"]["mot"]["omissions"], 10)
         self.assertEqual(report["modules"]["rti"]["omissions"], 10)
+        self.assertEqual([r["module"] for r in report["runs"]], ["mot", "rti", "mot"])
+        self.assertEqual(len({r["test_run_id"] for r in report["runs"]}), 3)
+        self.assertEqual(len(self.repo.sessions()), 1)
         self.assertGreater(len(records), 750)
 
 

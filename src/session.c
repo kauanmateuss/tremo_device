@@ -13,7 +13,9 @@ bool session_is_open(void) {
     return current.state == SESSION_RUNNING || current.state == SESSION_PAUSED;
 }
 void session_record_test(void) {
-    if (session_is_open()) ++current.tests_performed;
+    if (!session_is_open()) return;
+    ++current.tests_performed;
+    current.pause_requested = false;
 }
 bool session_configure(session_config_t value) {
     if (session_is_open()) return false;

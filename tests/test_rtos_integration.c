@@ -105,7 +105,10 @@ static void user_script(void *parameter) {
     move(0, 4095); press(5); // MPU COG SIM.
     assert(session_config()->cognitive_mpu);
     press(6); wait_app(APP_MENU);
-    move(0, 0); move(0, 0); press(5); wait_app(APP_COG_MENU);
+    move(0, 4095); press(5); wait_app(APP_SESSIONS);
+    press(5); wait_app(APP_SESSION_ACTIVE);
+    press(22); wait_app(APP_MENU);
+    move(0, 4095); press(5); wait_app(APP_COG_MENU);
     press(5); wait_app(APP_READY); // Preparo e calibração pelo fluxo real.
     press(5); wait_app(APP_MOT);
     assert(mot_get_state() == MOT_INSTRUCTIONS);
@@ -126,7 +129,7 @@ static void user_script(void *parameter) {
     assert(mot_result()->record_count == 1 && mot_result()->records[0].outcome == MOT_CORRECT);
     mock_link = CYW43_LINK_UP;
     press(6);
-    assert(session_current()->state == SESSION_INTERRUPTED);
+    assert(session_current()->state == SESSION_RUNNING && session_current()->tests_performed == 1);
     assert(monitoring_result()->reason == MONITORING_INTERRUPTED);
     assert(monitoring_result()->session_id == mot_result()->session_id);
     assert(monitoring_result()->valid[0] > 10 && monitoring_result()->buffer_drops == 0);

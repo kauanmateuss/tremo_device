@@ -15,6 +15,7 @@ int main(void) {
     app_init(); step(CONTROL_NONE, 2000);
     session_config_t config = *session_config(); config.tests_mask = 3;
     assert(session_configure(config));
+    open_session();
     choose("AVAL COMPLETA");
     step(CONTROL_CONFIRM, 5);
     step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 5); finish_calibration();
@@ -24,6 +25,11 @@ int main(void) {
     step(CONTROL_CONFIRM, 5); complete_mot();
     step(CONTROL_CONFIRM, 5); complete_rti();
     step(CONTROL_CONFIRM, 5);
+    assert(session_current()->state == SESSION_RUNNING);
+    step(CONTROL_BACK, 5); choose("AVAL INDIVIDUAL"); choose("MOT");
+    complete_mot(); step(CONTROL_BACK, 5);
+    step(CONTROL_BACK, 5); choose("SESSOES");
+    step(CONTROL_BACK, 5); step(CONTROL_CONFIRM, 5);
     assert(session_current()->state == SESSION_COMPLETE);
     assert(telemetry_dropped() == 0);
     return 0;

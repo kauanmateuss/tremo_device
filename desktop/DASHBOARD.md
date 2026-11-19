@@ -43,7 +43,7 @@ a cada três segundos. O comando `collect` continua disponível para coleta sem 
 
 - **Visão Geral** mostra a sessão mais recente, o paciente registrado no início e os resultados mais recentes de cada módulo. A aceleração RMS usa o MPU 1 nos últimos 60 segundos de dados, após remover a média de cada eixo.
 - **Configurações** permite cadastrar um identificador de até 16 caracteres (letras sem acento, dígitos, hífen ou sublinhado), selecionar a placa e associar, substituir ou remover o paciente. A confirmação da placa atualiza o banco. O firmware mantém a associação em RAM e anuncia seu estado ao reconectar. Após reiniciar a placa, associe o paciente novamente.
-- Na placa, abra **Sessões** e pressione A para iniciar. O clique no joystick volta ao menu. B solicita o encerramento e A confirma. Os testes individuais e a avaliação completa reutilizam a sessão aberta.
+- Na placa, abra **Sessões** e pressione A para iniciar. O clique no joystick volta ao menu. B solicita o encerramento e A confirma. Selecionar uma avaliação sem sessão aberta leva à tela de início. Ao concluir ou interromper uma avaliação, a sessão continua aberta para o próximo teste. A telemetria numera as execuções no campo `run` dentro da sessão. No SQLite, a chave `test_runs.run_id` identifica cada execução no banco e as consultas retornam esse valor como `test_run_id` nos resultados e nas tentativas.
 - Em **Histórico**, Selecione uma sessão pela lista; filtre pelo estado ou pesquise o ID da sessão
   ou da placa. A busca consulta o banco inteiro, mostrando até 200 resultados
   mais recentes. IDs completos estão nos detalhes e podem ser copiados.
