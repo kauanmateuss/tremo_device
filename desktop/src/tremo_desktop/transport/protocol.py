@@ -6,6 +6,18 @@ import re
 HEX = re.compile(r"[0-9a-f]{16}\Z")
 MODULES = ("mot", "rti", "prm", "pal", "mpu")
 MAX_PAYLOAD = 16384
+# Tópicos do contrato bidirecional v2
+TOPIC_EVENTS = "tremo/v1/devices/{device}/events"
+TOPIC_COMMANDS = "tremo/v1/devices/{device}/commands"
+TOPIC_CONFIRMATIONS = "tremo/v1/devices/{device}/confirmations"
+COMMAND_ASSOCIATE = "associate_patient"
+COMMAND_DISASSOCIATE = "disassociate_patient"
+CONFIRM_ASSOCIATION = "association_confirmed"
+CONFIRM_DISASSOCIATION = "disassociation_confirmed"
+ASSOC_STATUS_OK = "ok"
+ASSOC_STATUS_ERROR = "error"
+ASSOC_STATUS_ALREADY = "already_associated"
+ASSOC_STATUS_NOT_ASSOCIATED = "not_associated"
 
 
 class InvalidMessage(ValueError):
@@ -158,3 +170,51 @@ def decode(topic, payload):
         raise
     except (TypeError, KeyError, ValueError, RecursionError) as exc:
         raise InvalidMessage("mensagem não corresponde ao contrato") from exc
+
+
+def encode_command(device, command, data):
+    """Codifica um comando para publicação no tópico de comandos."""
+    return dict(v=2, device=device, command=command, data=data, t_us=0)
+
+
+def encode_confirmation(device, confirmation, status, data=None):
+    """Codifica uma confirmação para publicação no tópico de confirmações."""
+    payload = dict(v=2, device=device, confirmation=confirmation, status=status)
+    if data is not None:
+        payload["data"] = data
+    return payload
+
+
+def decode_command(topic, payload):
+    """Decodifica e valida uma mensagem recebida no tópico de confirmações."""
+    import json
+    import math
+    try:
+        if len(payload) > MAX_PAYLOAD:
+            raise InvalidMessage("mensagem excede limite")
+        e = json.loads(payload, object_pairs_hook=_unique_object, parse_float=_finite_float,
+                       parse_constant=lambda _: (_ for _ in ()).throw(InvalidMessage("número não finito")))
+        fields(e, ("v", "device", "confirmation", "status"))
+        if type(e["v"]) is not int or e["v"] != 2:
+            raise InvalidMessage("versão não suportada")
+        if not isinstance(e["device"], str) or not HEX.fullmatch(e["device"]):
+            raise InvalidMessage("identificador inválido")
+        if e["confirmation"] not in (CONFIRM_ASSOCIATION, CONFIRM_DISASSOCIATION):
+            raise InvalidMessage("confirmação desconhecida")
+        if e["status"] not in (ASSOC_STATUS_OK, ASSOC_STATUS_ERROR, ASSOC_STATUS_ALREADY, ASSOC_STATUS_NOT_ASSOCIATED):
+            raise InvalidMessage("status inválido")
+        if "data" in e and not isinstance(e["data"], dict):
+            raise InvalidMessage("dados devem ser um objeto")
+        return e
+    except InvalidMessage:
+        raise
+    except (TypeError, KeyError, ValueError, RecursionError) as exc:
+        raise InvalidMessage("confirmação não corresponde ao contrato") from exc
+
+
+def topic_commands(device):
+    return TOPIC_COMMANDS.format(device=device)
+
+
+def topic_confirmations(device):
+    return TOPIC_CONFIRMATIONS.format(device=device)
