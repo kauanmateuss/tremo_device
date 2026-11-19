@@ -9,8 +9,14 @@ void session_init(uint32_t boot_nonce) {
     current = (session_t){0};
     config = (session_config_t){.duration_ms = 30000, .sample_ms = 40, .tests_mask = 15, .tremor_first = true};
 }
+bool session_is_open(void) {
+    return current.state == SESSION_RUNNING || current.state == SESSION_PAUSED;
+}
+void session_record_test(void) {
+    if (session_is_open()) ++current.tests_performed;
+}
 bool session_configure(session_config_t value) {
-    if (current.state == SESSION_RUNNING || current.state == SESSION_PAUSED) return false;
+    if (session_is_open()) return false;
     if ((value.duration_ms != 30000 && value.duration_ms != 60000) ||
         (value.sample_ms != 20 && value.sample_ms != 40) || !value.tests_mask || value.tests_mask > 15) return false;
     config = value; return true;
@@ -20,7 +26,7 @@ bool session_begin(session_kind_t kind, uint64_t now_us) {
     return session_begin_patient(kind, now_us, "");
 }
 bool session_begin_patient(session_kind_t kind, uint64_t now_us, const char *patient) {
-    if (current.state == SESSION_RUNNING || current.state == SESSION_PAUSED || sequence == UINT32_MAX) return false;
+    if (session_is_open() || sequence == UINT32_MAX) return false;
     current = (session_t){.id = ((uint64_t)nonce << 32) | ++sequence, .started_us = now_us,
         .state = SESSION_RUNNING, .kind = kind, .config = config};
     snprintf(current.patient_id, sizeof(current.patient_id), "%s", patient);
@@ -40,7 +46,7 @@ uint64_t session_resume(uint64_t now_us) {
 }
 void session_finish(session_state_t reason, uint64_t now_us) {
     if (reason != SESSION_COMPLETE && reason != SESSION_INTERRUPTED && reason != SESSION_ERROR) return;
-    if (current.state != SESSION_RUNNING && current.state != SESSION_PAUSED) return;
+    if (!session_is_open()) return;
     if (current.state == SESSION_PAUSED) session_resume(now_us);
     current.ended_us = now_us; current.state = reason; current.pause_requested = false;
     telemetry_state(&current, now_us, true);

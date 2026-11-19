@@ -402,6 +402,8 @@ int main(void) {
     app_init(); step(CONTROL_NONE, 2000);
     choose("SESSOES"); step(CONTROL_CONFIRM, 5);
     uint64_t session = session_current()->id;
+    step(CONTROL_CONFIRM, 5);
+    assert(session_current()->id == session && session_is_open());
     step(CONTROL_PAUSE, 5);
     choose("AVAL INDIVIDUAL");
     for (unsigned i = 0; i < 2; ++i) {
@@ -412,8 +414,13 @@ int main(void) {
     assert(!strcmp(screen[5], "TESTES 2"));
     step(CONTROL_BACK, 5); step(CONTROL_BACK, 5);
     assert(app_get_state() == APP_SESSION_ACTIVE);
+    step(CONTROL_BACK, 5); step(CONTROL_PAUSE, 5);
+    assert(app_get_state() == APP_MENU && session_is_open());
+    choose("SESSOES");
     step(CONTROL_BACK, 5); step(CONTROL_CONFIRM, 5);
     assert(session_current()->state == SESSION_COMPLETE);
+    step(CONTROL_CONFIRM, 5);
+    assert(session_current()->id != session && session_current()->tests_performed == 0);
     exercise_evaluations();
     exercise_mot_capture();
     exercise_memory_capture();

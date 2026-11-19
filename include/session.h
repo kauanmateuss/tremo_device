@@ -14,7 +14,7 @@ typedef struct {
 typedef struct {
     uint64_t id, started_us, ended_us, paused_us, pause_started_us;
     char patient_id[17];
-    uint32_t pauses;
+    uint32_t pauses, tests_performed;
     bool pause_requested;
     session_state_t state;
     session_kind_t kind;
@@ -26,6 +26,8 @@ bool session_configure(session_config_t config);
 const session_config_t *session_config(void);
 bool session_begin(session_kind_t kind, uint64_t now_us);
 bool session_begin_patient(session_kind_t kind, uint64_t now_us, const char *patient);
+bool session_is_open(void);
+void session_record_test(void);
 void session_request_pause(void);
 bool session_pause(uint64_t now_us);
 uint64_t session_resume(uint64_t now_us);
