@@ -10,6 +10,8 @@ from .components import label, MetricCard, date_text, duration
 from .worker import DashboardWorker
 from .results import ResultsPanel, DetailsPanel
 from .charts import TremorPanel
+from .settings import SettingsPanel
+from .about import AboutPanel
 
 
 class DashboardWindow(QMainWindow):
@@ -147,7 +149,9 @@ class DashboardWindow(QMainWindow):
         self.results = ResultsPanel()
         self.tremor = TremorPanel()
         self.details = DetailsPanel()
-        for widget, title in ((self.results, "Resultados cognitivos"), (self.tremor, "Tremores"), (self.details, "Detalhes da sessão")):
+        self.settings = SettingsPanel(self.path)
+        self.about = AboutPanel()
+        for widget, title in ((self.results, "Resultados cognitivos"), (self.tremor, "Tremores"), (self.details, "Detalhes da sessão"), (self.settings, "Configurações"), (self.about, "Sobre")):
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setWidget(widget)
