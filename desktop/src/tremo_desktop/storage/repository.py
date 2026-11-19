@@ -37,8 +37,13 @@ CREATE TABLE IF NOT EXISTS devices (
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS patients (
  patient_id TEXT PRIMARY KEY, name TEXT, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS patient_devices (
+ patient_id TEXT NOT NULL, device_id TEXT NOT NULL, associated_at TEXT NOT NULL,
+ PRIMARY KEY(patient_id, device_id),
+ FOREIGN KEY(patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE,
+ FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE);
 CREATE INDEX IF NOT EXISTS samples_time ON samples(device,session,sensor,t_us);
-PRAGMA user_version=3;
+PRAGMA user_version=4;
 """
 
 
@@ -63,7 +68,7 @@ class Repository:
         try:
             self.db.execute("PRAGMA foreign_keys=ON")
             version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in ((1, 2, 3) if read_only else (0, 1, 2, 3)):
+            if version not in ((1, 2, 3, 4) if read_only else (0, 1, 2, 3, 4)):
                 raise RuntimeError("Versão do banco não suportada")
             if not read_only:
                 self.db.execute("PRAGMA journal_mode=WAL")
@@ -83,6 +88,16 @@ class Repository:
                         "BEGIN;"
                         "CREATE TABLE IF NOT EXISTS patients ("
                         " patient_id TEXT PRIMARY KEY, name TEXT, created_at TEXT NOT NULL);"
+                        "COMMIT;"
+                    )
+                elif version == 3:
+                    self.db.executescript(
+                        "BEGIN;"
+                        "CREATE TABLE IF NOT EXISTS patient_devices ("
+                        " patient_id TEXT NOT NULL, device_id TEXT NOT NULL, associated_at TEXT NOT NULL,"
+                        " PRIMARY KEY(patient_id, device_id),"
+                        " FOREIGN KEY(patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE,"
+                        " FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE);"
                         "COMMIT;"
                     )
         except Exception:
