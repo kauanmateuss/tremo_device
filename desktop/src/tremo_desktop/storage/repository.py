@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS results (
 CREATE TABLE IF NOT EXISTS rejected_messages (
  id INTEGER PRIMARY KEY, received_at TEXT NOT NULL, topic TEXT NOT NULL,
  payload_hash TEXT NOT NULL, reason TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS test_runs (
+ run_id INTEGER PRIMARY KEY AUTOINCREMENT, device TEXT NOT NULL,
+ session TEXT NOT NULL, module TEXT NOT NULL, run_number INTEGER NOT NULL,
+ started_at TEXT, finished_at TEXT, state TEXT, data TEXT,
+ FOREIGN KEY(device,session) REFERENCES sessions(device,session),
+ UNIQUE(device,session,module,run_number));
 CREATE TABLE IF NOT EXISTS devices (
  device_id TEXT PRIMARY KEY, firmware_version TEXT NOT NULL, state TEXT NOT NULL,
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -44,7 +50,7 @@ CREATE TABLE IF NOT EXISTS patient_devices (
  FOREIGN KEY(patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE,
  FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE);
 CREATE INDEX IF NOT EXISTS samples_time ON samples(device,session,sensor,t_us);
-PRAGMA user_version=5;
+PRAGMA user_version=6;
 """
 
 
@@ -69,7 +75,7 @@ class Repository:
         try:
             self.db.execute("PRAGMA foreign_keys=ON")
             version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in ((1, 2, 3, 4, 5) if read_only else (0, 1, 2, 3, 4, 5)):
+            if version not in ((1, 2, 3, 4, 5, 6) if read_only else (0, 1, 2, 3, 4, 5, 6)):
                 raise RuntimeError("Versão do banco não suportada")
             if not read_only:
                 self.db.execute("PRAGMA journal_mode=WAL")
@@ -105,6 +111,17 @@ class Repository:
                     self.db.executescript(
                         "BEGIN;"
                         "ALTER TABLE sessions ADD COLUMN patient_id TEXT REFERENCES patients(patient_id);"
+                        "COMMIT;"
+                    )
+                elif version == 5:
+                    self.db.executescript(
+                        "BEGIN;"
+                        "CREATE TABLE IF NOT EXISTS test_runs ("
+                        " run_id INTEGER PRIMARY KEY AUTOINCREMENT, device TEXT NOT NULL, session TEXT NOT NULL,"
+                        " module TEXT NOT NULL, run_number INTEGER NOT NULL, started_at TEXT, finished_at TEXT,"
+                        " state TEXT, data TEXT,"
+                        " FOREIGN KEY(device,session) REFERENCES sessions(device,session),"
+                        " UNIQUE(device,session,module,run_number));"
                         "COMMIT;"
                     )
         except Exception:
