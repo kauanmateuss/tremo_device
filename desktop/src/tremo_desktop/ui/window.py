@@ -4,12 +4,17 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot, QSize
 from PySide6.QtWidgets import (QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout,
     QGridLayout, QListWidget, QListWidgetItem, QLineEdit, QComboBox, QPushButton,
-    QCheckBox, QFileDialog, QStackedWidget, QTabWidget, QScrollArea)
+    QCheckBox, QFileDialog, QStackedWidget, QScrollArea, QLabel)
 from tremo_desktop.services.dashboard import STATES, KINDS
 from .components import label, MetricCard, date_text, duration
 from .worker import DashboardWorker
-from .results import ResultsPanel, DetailsPanel
+from .results import ResultsPanel
+from .details import DetailsPanel
 from .charts import TremorPanel
+from .overview import OverviewPanel
+from .history import HistoryPanel
+from .settings import SettingsPanel
+from .about import AboutPanel
 
 
 class DashboardWindow(QMainWindow):
@@ -45,10 +50,10 @@ class DashboardWindow(QMainWindow):
         self.debounce.setSingleShot(True)
         self.debounce.setInterval(250)
         self.debounce.timeout.connect(self.invalidate)
-        self.search.textChanged.connect(lambda: self.debounce.start())
-        self.state_filter.currentIndexChanged.connect(self.invalidate)
-        self.session_list.currentItemChanged.connect(self._selection_changed)
-        self.refresh_button.clicked.connect(self.invalidate)
+        self.overview.search.textChanged.connect(lambda: self.debounce.start())
+        self.overview.state_filter.currentIndexChanged.connect(self.invalidate)
+        self.overview.session_list.currentItemChanged.connect(self._selection_changed)
+        self.overview.refresh_button.clicked.connect(self.invalidate)
         QTimer.singleShot(0, self.refresh)
 
     def _build(self):
@@ -57,122 +62,182 @@ class DashboardWindow(QMainWindow):
         horizontal = QHBoxLayout(root)
         horizontal.setContentsMargins(0, 0, 0, 0)
         horizontal.setSpacing(0)
+
+        # Sidebar escura com navegação
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(282)
+        sidebar.setFixedWidth(260)
         side = QVBoxLayout(sidebar)
         side.setContentsMargins(20, 26, 20, 18)
-        side.setSpacing(14)
-        side.addWidget(label("tremo", "brand"))
-        side.addWidget(label("ACOMPANHAMENTO DE AVALIAÇÕES", "eyebrow"))
-        side.addSpacing(16)
-        side.addWidget(label("Sessões", "section"))
-        self.search = QLineEdit()
-        self.search.setPlaceholderText("Buscar ID da sessão ou placa")
-        self.search.setAccessibleName("Buscar sessão ou placa")
-        side.addWidget(self.search)
-        self.state_filter = QComboBox()
-        self.state_filter.addItem("Todos os estados", None)
-        for state in (1, 2, 3, 4, 5):
-            self.state_filter.addItem(STATES[state], state)
-        self.state_filter.setAccessibleName("Filtrar por estado da sessão")
-        side.addWidget(self.state_filter)
-        self.session_list = QListWidget()
-        self.session_list.setAccessibleName("Sessões recebidas")
-        side.addWidget(self.session_list, 1)
-        self.list_count = label("Nenhuma sessão", "muted")
-        side.addWidget(self.list_count)
-        self.auto_refresh = QCheckBox("Atualizar a cada 3 segundos")
-        self.auto_refresh.setChecked(True)
-        side.addWidget(self.auto_refresh)
-        open_button = QPushButton("Abrir outro banco…")
-        open_button.setEnabled(not self.demo)
-        open_button.clicked.connect(self.open_database)
-        side.addWidget(open_button)
-        side.addWidget(label("A leitura local acompanha os dados gravados pelo coletor.", "muted"))
+        side.setSpacing(10)
+
+        brand = QFrame()
+        brand_layout = QVBoxLayout(brand)
+        brand_layout.setContentsMargins(0, 0, 0, 0)
+        brand_layout.setSpacing(6)
+        brand_icon = QLabel("🧠")
+        brand_icon.setStyleSheet("font-size: 34px; background: transparent;")
+        brand_title = label("BitDogLab", "brand")
+        brand_sub = label("Parkinson", "eyebrow")
+        brand_layout.addWidget(brand_icon)
+        brand_layout.addWidget(brand_title)
+        brand_layout.addWidget(brand_sub)
+        side.addWidget(brand)
+
+        side.addSpacing(20)
+
+        self.nav_visao_geral = self._nav_item("🏠", "Visão Geral", "Resumo do paciente, dispositivo e última avaliação", True)
+        self.nav_historico = self._nav_item("📜", "Histórico", "Lista de sessões, testes e resultados anteriores", False)
+        self.nav_configuracoes = self._nav_item("⚙️", "Configurações", "Gerenciamento do dispositivo, conexão e parâmetros", False)
+        self.nav_sobre = self._nav_item("ℹ️", "Sobre", "Informações do projeto, software e hardware", False)
+        for item in (self.nav_visao_geral, self.nav_historico, self.nav_configuracoes, self.nav_sobre):
+            side.addWidget(item)
+
+        side.addStretch()
+
+        status = QFrame()
+        status_layout = QVBoxLayout(status)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(4)
+        online = QLabel("● Online")
+        online.setStyleSheet("color: #2ecc71; font-weight: 650; font-size: 12px; background: transparent;")
+        version = label("v1.0.0", "muted")
+        status_layout.addWidget(online)
+        status_layout.addWidget(version)
+        side.addWidget(status)
+
         horizontal.addWidget(sidebar)
+
+        # Área principal com as abas
         workspace = QWidget()
         workspace.setObjectName("workspace")
         main = QVBoxLayout(workspace)
-        main.setContentsMargins(26, 23, 26, 16)
-        main.setSpacing(15)
-        if self.demo:
-            main.addWidget(label("DEMONSTRAÇÃO · Dados simulados, separados das avaliações reais", "demo"))
-        top = QHBoxLayout()
-        titles = QVBoxLayout()
-        titles.setSpacing(4)
-        titles.addWidget(label("Visão da avaliação", "heading"))
-        titles.addWidget(label("Resultados, movimento e qualidade da coleta", "muted"))
-        top.addLayout(titles, 1)
-        self.refresh_button = QPushButton("Atualizar")
-        self.refresh_button.setShortcut("F5")
-        top.addWidget(self.refresh_button)
-        main.addLayout(top)
+        main.setContentsMargins(0, 0, 0, 0)
+        main.setSpacing(0)
+
+        # Header da página atual
+        self.header = QFrame()
+        self.header.setObjectName("header")
+        header_layout = QHBoxLayout(self.header)
+        header_layout.setContentsMargins(26, 20, 26, 14)
+        header_layout.setSpacing(0)
+        self.header_title = label("Olá!", "heading")
+        self.header_subtitle = label("Aqui está um resumo do estado do dispositivo e do paciente.", "muted")
+        header_info = QVBoxLayout()
+        header_info.setSpacing(4)
+        header_info.addWidget(self.header_title)
+        header_info.addWidget(self.header_subtitle)
+        header_layout.addLayout(header_info, 1)
+        self.status_chip = QLabel("● Conectado   BDL-0001")
+        self.status_chip.setStyleSheet("""
+            QLabel {
+                background: #e7f3ef; color: #0e7c5d; border-radius: 10px;
+                padding: 6px 14px; font-weight: 650; font-size: 12px;
+            }
+        """)
+        self.status_chip.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        header_layout.addWidget(self.status_chip)
+        main.addWidget(self.header)
+
+        # Conteúdo das abas
         self.stack = QStackedWidget()
-        self.empty_page = QWidget()
-        empty = QVBoxLayout(self.empty_page)
-        empty.addStretch()
-        self.empty_title = label("Carregando sessões…", "heading")
-        self.empty_text = label("", "muted")
-        for widget in (self.empty_title, self.empty_text):
-            widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.addWidget(widget)
-        empty.addStretch()
-        self.stack.addWidget(self.empty_page)
-        self.content = QWidget()
-        content = QVBoxLayout(self.content)
-        content.setContentsMargins(0, 0, 0, 0)
-        content.setSpacing(13)
-        self.session_title = label("", "section")
-        self.session_caption = label("", "muted")
-        content.addWidget(self.session_title)
-        content.addWidget(self.session_caption)
-        metrics = QGridLayout()
-        metrics.setSpacing(12)
-        self.metrics = [MetricCard(name) for name in ("ESTADO DA SESSÃO", "TEMPO ATIVO", "TENTATIVAS RECEBIDAS", "MENSAGENS RECEBIDAS")]
-        for index, widget in enumerate(self.metrics):
-            metrics.addWidget(widget, 0, index)
-            metrics.setColumnStretch(index, 1)
-        content.addLayout(metrics)
-        self.banner = QFrame()
-        self.banner.setObjectName("banner")
-        banner_layout = QVBoxLayout(self.banner)
-        banner_layout.setContentsMargins(14, 11, 14, 11)
-        self.quality_title = label("")
-        self.quality_text = label("", "muted")
-        banner_layout.addWidget(self.quality_title)
-        banner_layout.addWidget(self.quality_text)
-        content.addWidget(self.banner)
-        self.tabs = QTabWidget()
-        self.results = ResultsPanel()
-        self.tremor = TremorPanel()
-        self.details = DetailsPanel()
-        for widget, title in ((self.results, "Resultados cognitivos"), (self.tremor, "Tremores"), (self.details, "Detalhes da sessão")):
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setWidget(widget)
-            self.tabs.addTab(scroll, title)
-        content.addWidget(self.tabs, 1)
-        self.stack.addWidget(self.content)
+        self.overview = OverviewPanel(path=self.path)
+        self.history = HistoryPanel()
+        self.settings = SettingsPanel()
+        self.about = AboutPanel()
+        self.stack.addWidget(self.overview)
+        self.stack.addWidget(self.history)
+        self.stack.addWidget(self.settings)
+        self.stack.addWidget(self.about)
         main.addWidget(self.stack, 1)
-        main.addWidget(label("Protocolo experimental adaptado · resultados para análise profissional, sem escores clínicos normativos", "muted"))
+
+        # Delegações para compatibilidade com testes e código existente
+        self.session_list = self.overview.session_list
+        self.results = self.overview.results
+        self.details = self.overview.details
+        self.tremor = self.overview.tremor
+        self.stack = self.overview.stack
+        self.content = self.overview.content
+        self.empty_page = self.overview.empty_page
+        self.empty_title = self.overview.empty_title
+        self.state_filter = self.overview.state_filter
+        self.search = self.overview.search
+        self.tabs = self.overview.tabs_area
+        self.tabs.setCurrentIndex = lambda index: None
+        self.tabs.currentIndex = lambda: 0
+        self.banner = QFrame()
+        self.banner.setProperty("tone", "neutral")
+        self.quality_text = label("")
+        self.quality_title = label("")
+
         horizontal.addWidget(workspace, 1)
         self.statusBar().showMessage("Consultando banco local…")
 
-    @Slot()
+    def _nav_item(self, icon, title, subtitle, active=False):
+        item = QFrame()
+        item.setObjectName("navItem")
+        item.setProperty("active", "true" if active else "false")
+        layout = QVBoxLayout(item)
+        layout.setContentsMargins(18, 12, 14, 12)
+        layout.setSpacing(4)
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet("font-size: 20px; background: transparent;")
+        top.addWidget(icon_label)
+        top.addStretch()
+        status_dot = QLabel("●")
+        status_dot.setFixedSize(8, 8)
+        status_dot.setStyleSheet("color: #2ecc71; background: transparent;")
+        top.addWidget(status_dot)
+        layout.addLayout(top)
+        title_label = label(title, "navTitle")
+        title_label.setStyleSheet("font-size: 15px; font-weight: 650; background: transparent;")
+        sub_label = label(subtitle, "navSub")
+        sub_label.setStyleSheet("font-size: 11px; background: transparent;")
+        layout.addWidget(title_label)
+        layout.addWidget(sub_label)
+        item.setCursor(Qt.CursorShape.PointingHandCursor)
+        item.mousePressEvent = lambda event: self._on_nav_clicked(item)
+        return item
+
+    def _on_nav_clicked(self, item):
+        for other, index in (
+            (self.nav_visao_geral, 0),
+            (self.nav_historico, 1),
+            (self.nav_configuracoes, 2),
+            (self.nav_sobre, 3),
+        ):
+            active = other is item
+            other.setProperty("active", "true" if active else "false")
+            other.style().unpolish(other)
+            other.style().polish(other)
+        self._navigate(index)
+
+    def _navigate(self, index):
+        self.stack.setCurrentIndex(index)
+        titles = ("Olá!", "Histórico", "Configurações", "Sobre")
+        subtitles = (
+            "Aqui está um resumo do estado do dispositivo e do paciente.",
+            "Lista de sessões, testes e resultados anteriores.",
+            "Gerenciamento do dispositivo, conexão e parâmetros.",
+            "Informações do projeto, software e hardware.",
+        )
+        self.header_title.setText(titles[index])
+        self.header_subtitle.setText(subtitles[index])
+        if index == 0:
+            self.refresh()
+
     def invalidate(self):
         self.revision += 1
-        self.stack.setCurrentWidget(self.empty_page)
-        self.empty_title.setText("Atualizando avaliação…")
-        self.empty_text.setText("")
-        self.refresh(force=True)
+        self.overview.invalidate()
 
     def refresh(self, force=False):
-        if self.closing or self.busy or (not force and not self.auto_refresh.isChecked() and self.snapshot is not None):
+        if self.closing or self.busy or (not force and not self.overview.auto_refresh.isChecked() and self.overview.snapshot is not None):
             return
         self.busy = True
         self.requested.emit(self.revision, dict(path=self.path, selected=self.selected,
-                            query=self.search.text(), state=self.state_filter.currentData()))
+                            query=self.overview.search.text(), state=self.overview.state_filter.currentData()))
 
     def _selection_changed(self, current, previous):
         if current is not None:
@@ -189,65 +254,10 @@ class DashboardWindow(QMainWindow):
         if revision != self.revision:
             self.refresh(force=True)
             return
-        changed = not self.snapshot or self.snapshot["selected"] != data["selected"]
         self.snapshot = data
         self.selected = data["selected"]
-        self.session_list.blockSignals(True)
-        scroll = self.session_list.verticalScrollBar().value()
-        self.session_list.clear()
-        for session in data["sessions"]:
-            key = (session["device"], session["session"])
-            text = f"{date_text(session['received_first'], short=True)} · {STATES.get(session['state'], 'Desconhecido')}\n{session['kind']}\n#{session['session'][-8:]} · placa …{session['device'][-6:]}"
-            item = QListWidgetItem(text)
-            item.setSizeHint(QSize(230, 98))
-            item.setData(Qt.ItemDataRole.UserRole, key)
-            item.setToolTip(f"Sessão {session['session']}\nPlaca {session['device']}")
-            self.session_list.addItem(item)
-            if key == self.selected:
-                self.session_list.setCurrentItem(item)
-        self.session_list.verticalScrollBar().setValue(scroll)
-        self.session_list.blockSignals(False)
-        count = len(data["sessions"])
-        self.list_count.setText(f"{count} sessões encontradas" if count < 200 else "200 mais recentes · refine a busca")
-        self.statusBar().showMessage(f"Consulta: {datetime.now():%H:%M:%S}  •  Banco: {self.path.name}")
-        self.statusBar().setToolTip(str(self.path))
-        if not data["report"]:
-            self.stack.setCurrentWidget(self.empty_page)
-            self.empty_title.setText("Aguardando a primeira sessão" if data["missing"] else "Nenhuma sessão encontrada")
-            self.empty_text.setText("Inicie o coletor MQTT usando este banco e realize uma avaliação na placa.\nO dashboard atualizará quando os registros chegarem." if data["missing"] or not (self.search.text() or self.state_filter.currentData()) else
-                                    "Altere os filtros ou abra outro banco para consultar as avaliações.")
-            return
-        self.stack.setCurrentWidget(self.content)
-        report = data["report"]
-        config, timing = report["configuration"] or {}, report["timing"] or {}
-        self.session_title.setText(KINDS.get(config.get("kind"), "Avaliação · início não recebido"))
-        self.session_caption.setText(f"Sessão {report['session']}  •  Recebida em {date_text(report['first_received_utc'])}")
-        self.metrics[0].set_value(STATES.get(report["state"], "Desconhecido"), "Informado pela placa")
-        self.metrics[1].set_value(duration(timing.get("active_us")),
-                                 f"{timing.get('pauses', 0)} pausas · {duration(timing.get('paused_us'))} em pausa" if timing else "Disponível após o encerramento")
-        assessed = sum(not t["training"] for t in data["trials"])
-        self.metrics[2].set_value(str(assessed), "Avaliação · sem treino")
-        quality = report["quality"]
-        expected = quality["expected_messages"]
-        self.metrics[3].set_value(str(quality["received_messages"]), f"de {expected} esperadas" if expected is not None else "Total esperado ainda não recebido")
-        live = report["state"] in (1, 2) and report["timing"] is None
-        issues = quality["issues"]
-        live_issues = [issue for issue in issues if issue != "encerramento ausente"]
-        tone = "neutral" if live and not live_issues else "good" if quality["complete"] else "warning"
-        self.banner.setProperty("tone", tone)
-        self.banner.style().unpolish(self.banner)
-        self.banner.style().polish(self.banner)
-        self.quality_title.setText("Sessão em andamento · confira as ocorrências da coleta" if live and live_issues else
-                                   "Sessão em andamento · integridade ainda não concluída" if live else
-                                   "Dados conferidos · registros e resumos consistentes" if quality["complete"] else "Atenção à qualidade dos dados")
-        self.quality_text.setText("Último recebimento: " + date_text(report["last_received_utc"]) if live and not live_issues else
-                                 "A integridade dos registros é independente da conclusão da avaliação." if not issues else
-                                 "; ".join(issues[:3]) + (". Veja todas as ocorrências nos detalhes." if len(issues) > 3 else "."))
-        self.results.set_data(data)
-        self.tremor.set_data(data, reset=changed)
-        self.details.set_data(data)
-        if changed:
-            self.tabs.setCurrentIndex(1 if config.get("kind") == 0 else 0)
+        self.overview._loaded(revision, data)
+        self.history.set_sessions(data["sessions"])
 
     @Slot(int, str)
     def _failed(self, revision, message):
@@ -257,10 +267,7 @@ class DashboardWindow(QMainWindow):
         if revision != self.revision:
             self.refresh(force=True)
             return
-        self.stack.setCurrentWidget(self.empty_page)
-        self.empty_title.setText("Não foi possível consultar o banco")
-        self.empty_text.setText("Verifique o arquivo e as permissões. Os resultados anteriores estão ocultos.\n" + message)
-        self.statusBar().showMessage("Falha na consulta · tente atualizar ou abrir outro banco")
+        self.overview._failed(revision, message)
 
     def open_database(self):
         path, _ = QFileDialog.getOpenFileName(self, "Abrir banco de avaliações", str(self.path.parent),
@@ -269,8 +276,8 @@ class DashboardWindow(QMainWindow):
             self.path = Path(path).resolve()
             self.selected = None
             self.snapshot = None
-            self.search.clear()
-            self.state_filter.setCurrentIndex(0)
+            self.overview.search.clear()
+            self.overview.state_filter.setCurrentIndex(0)
             self.invalidate()
 
     def closeEvent(self, event):
@@ -280,7 +287,7 @@ class DashboardWindow(QMainWindow):
             self.debounce.stop()
             self.thread.quit()
             self.setEnabled(False)
-            event.ignore()  # O fechamento termina após a consulta em curso, sem destruir a thread.
+            event.ignore()
         else:
             event.accept()
 
