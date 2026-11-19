@@ -88,6 +88,7 @@ class Repository:
                         "CREATE TABLE IF NOT EXISTS devices ("
                         " device_id TEXT PRIMARY KEY, firmware_version TEXT NOT NULL, state TEXT NOT NULL,"
                         " created_at TEXT NOT NULL, updated_at TEXT NOT NULL);"
+                        "PRAGMA user_version=2;"
                         "COMMIT;"
                     )
                 elif version == 2:
@@ -95,6 +96,7 @@ class Repository:
                         "BEGIN;"
                         "CREATE TABLE IF NOT EXISTS patients ("
                         " patient_id TEXT PRIMARY KEY, name TEXT, created_at TEXT NOT NULL);"
+                        "PRAGMA user_version=3;"
                         "COMMIT;"
                     )
                 elif version == 3:
@@ -105,12 +107,14 @@ class Repository:
                         " PRIMARY KEY(patient_id, device_id),"
                         " FOREIGN KEY(patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE,"
                         " FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE);"
+                        "PRAGMA user_version=4;"
                         "COMMIT;"
                     )
                 elif version == 4:
                     self.db.executescript(
                         "BEGIN;"
                         "ALTER TABLE sessions ADD COLUMN patient_id TEXT REFERENCES patients(patient_id);"
+                        "PRAGMA user_version=5;"
                         "COMMIT;"
                     )
                 elif version == 5:
@@ -122,6 +126,7 @@ class Repository:
                         " state TEXT, data TEXT,"
                         " FOREIGN KEY(device,session) REFERENCES sessions(device,session),"
                         " UNIQUE(device,session,module,run_number));"
+                        "PRAGMA user_version=6;"
                         "COMMIT;"
                     )
         except Exception:
@@ -249,3 +254,80 @@ class Repository:
         return {row[0]: row[1] for row in self.db.execute(
             "SELECT sensor,count(*) FROM samples WHERE device=? AND session=? GROUP BY sensor",
             (device, session))}
+
+    # ----- gerenciamento de pacientes -----
+
+    def patients(self):
+        return [dict(row) for row in self.db.execute(
+            "SELECT patient_id, name, created_at FROM patients ORDER BY patient_id")]
+
+    def create_patient(self, patient_id, name=None):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO patients(patient_id, name, created_at) VALUES(?,?,?)",
+                (patient_id, name, utc_now()))
+
+    # ----- gerenciamento de dispositivos -----
+
+    def devices(self):
+        return [dict(row) for row in self.db.execute(
+            "SELECT device_id, firmware_version, state, created_at, updated_at FROM devices ORDER BY device_id")]
+
+    def create_device(self, device_id, firmware_version, state="ativo"):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO devices(device_id, firmware_version, state, created_at, updated_at) "
+                "VALUES(?,?,?,?,?) "
+                "ON CONFLICT(device_id) DO UPDATE SET firmware_version=excluded.firmware_version,"
+                " state=excluded.state, updated_at=excluded.updated_at",
+                (device_id, firmware_version, state, utc_now(), utc_now()))
+
+    # ----- associacao paciente <-> dispositivo -----
+
+    def patient_devices(self, patient_id):
+        """Dispositivos associados a um paciente."""
+        return [dict(row) for row in self.db.execute(
+            "SELECT d.device_id, d.firmware_version, d.state, pd.associated_at "
+            "FROM patient_devices pd JOIN devices d ON d.device_id = pd.device_id "
+            "WHERE pd.patient_id=? ORDER BY d.device_id", (patient_id,))]
+
+    def device_patients(self, device_id):
+        """Pacientes associados a um dispositivo."""
+        return [dict(row) for row in self.db.execute(
+            "SELECT p.patient_id, p.name, pd.associated_at "
+            "FROM patient_devices pd JOIN patients p ON p.patient_id = pd.patient_id "
+            "WHERE pd.device_id=? ORDER BY p.patient_id", (device_id,))]
+
+    def associate_patient_device(self, patient_id, device_id):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO patient_devices(patient_id, device_id, associated_at) VALUES(?,?,?) "
+                "ON CONFLICT(patient_id, device_id) DO UPDATE SET associated_at=excluded.associated_at",
+                (patient_id, device_id, utc_now()))
+
+    def disassociate_patient_device(self, patient_id, device_id):
+        with self.db:
+            self.db.execute(
+                "DELETE FROM patient_devices WHERE patient_id=? AND device_id=?",
+                (patient_id, device_id))
+
+    # ----- sessoes e execucoes de teste -----
+
+    def sessions_by_patient(self, patient_id):
+        return [dict(row) for row in self.db.execute(
+            "SELECT device, session, patient_id, received_first, received_last, state "
+            "FROM sessions WHERE patient_id=? ORDER BY received_first DESC", (patient_id,))]
+
+    def create_test_run(self, device, session, module, run_number, started_at=None,
+                        finished_at=None, state="em_andamento", data=None):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO test_runs(device, session, module, run_number, started_at,"
+                " finished_at, state, data) VALUES(?,?,?,?,?,?,?,?)",
+                (device, session, module, run_number, started_at, finished_at, state,
+                 encoded(data) if data is not None else None))
+
+    def test_runs_by_session(self, device, session):
+        return [dict(row) for row in self.db.execute(
+            "SELECT run_id, device, session, module, run_number, started_at, finished_at, state, data "
+            "FROM test_runs WHERE device=? AND session=? ORDER BY run_number, module", (device, session))]
