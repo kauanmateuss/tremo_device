@@ -1,4 +1,6 @@
 """Aba Visão Geral: resumo do paciente, dispositivo e última avaliação."""
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLineEdit, QComboBox, QPushButton, QCheckBox, QFrame, QLabel, QListWidget,
@@ -15,7 +17,6 @@ class OverviewPanel(QWidget):
     def __init__(self, path=None):
         super().__init__()
         self.setObjectName("panel")
-        from pathlib import Path
         self.path = Path(path).resolve() if path else None
         self.selected = None
         self.snapshot = None
