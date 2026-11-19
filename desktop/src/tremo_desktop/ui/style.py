@@ -1,7 +1,7 @@
 STYLE = """
 QWidget { font-family: 'Inter', 'Noto Sans', 'Segoe UI', sans-serif; font-size: 13px; color: #213c46; }
 QMainWindow, QWidget#workspace, QWidget#panel { background: #f3f6f7; }
-QFrame#sidebar { background: #ffffff; border-right: 1px solid #dce5e7; }
+QFrame#sidebar { background: #0e1b21; border-right: none; }
 QLabel { background: transparent; }
 QLabel#brand { font-size: 30px; font-weight: 750; color: #117d77; }
 QLabel#eyebrow { font-size: 11px; font-weight: 650; color: #70858e; }
@@ -10,7 +10,14 @@ QLabel#section { font-size: 17px; font-weight: 650; }
 QLabel#muted { color: #647c85; }
 QLabel#metric { font-size: 25px; font-weight: 650; }
 QLabel#score { font-size: 32px; font-weight: 650; color: #117d77; }
+QLabel#navTitle { color: #e8f2f4; font-size: 15px; font-weight: 650; }
+QLabel#navSub { color: #9fb3b9; font-size: 11px; }
+QFrame#navItem { background: transparent; border-radius: 10px; border: none; }
+QFrame#navItem[active="true"] { background: #16323a; border-left: 4px solid #15887e; }
+QFrame#navItem[active="true"] QLabel#navTitle { color: #ffffff; }
+QFrame#navItem[active="true"] QLabel#navSub { color: #b9d2d8; }
 QFrame#card { background: white; border: 1px solid #dce5e7; border-radius: 12px; }
+QFrame#header { background: #f3f6f7; border-bottom: 1px solid #dce5e7; }
 QFrame#banner { background: #e7f3ef; border: 1px solid #c8e5da; border-radius: 9px; }
 QFrame#banner[tone="warning"] { background: #fff5e5; border-color: #f0dbb5; }
 QFrame#banner[tone="neutral"] { background: #eaf1f8; border-color: #cfdeec; }
