@@ -33,7 +33,7 @@ class AboutPanel(QWidget):
         tech_box.setSpacing(8)
         tech_box.addWidget(label("Versões", "section"))
         for linha in (
-            "Dashboard: v1.0.0",
+            "Dashboard: v0.1.0",
             "Protocolo tremo: adaptado-v1",
             "Python: 3.11+",
             "PySide6: 6.x",

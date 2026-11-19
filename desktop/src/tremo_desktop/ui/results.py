@@ -1,3 +1,4 @@
+import json
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QComboBox, QTableWidgetItem
 from PySide6.QtCore import Qt
 from tremo_desktop.services.dashboard import MODULES, KINDS
@@ -142,7 +143,12 @@ class DetailsPanel(QWidget):
         text = f"Sessão: {r['session']}    •    Placa: {r['device']}\n"
         text += f"Primeiro recebimento: {date_text(r['first_received_utc'])}\n"
         text += f"Último recebimento: {date_text(r['last_received_utc'])}\n"
-        text += "Participante: não vinculado nesta versão"
+        text += f"Paciente: {r['patient_id'] or 'Sem associação registrada'}"
+        for run in r["runs"]:
+            detail = json.loads(run["data"] or "{}")
+            scores = (f" · {detail['correct']} acertos, {detail['wrong']} erros, {detail['omissions']} omissões"
+                      if "correct" in detail else "")
+            text += f"\nExecução {run['run_number']} · {run['module'].upper()} · {run['state']}{scores}"
         if config:
             text += f"\n{KINDS.get(config['kind'], 'Avaliação')} · MPU: {config['duration_ms'] // 1000} s / {1000 / config['sample_ms']:g} Hz · {config['protocol']}"
         self.metadata.setText(text)
@@ -162,12 +168,12 @@ class DetailsPanel(QWidget):
         counters = {}
         for index, trial in enumerate(rows):
             module, outcome = trial["module"], trial["outcome"]
-            group = (module, trial["training"])
+            group = (trial["run"], module, trial["training"])
             counters[group] = counters.get(group, 0) + 1
             names = ("Resposta", "Antecipação", "Omissão", "Interrompida") if module == "rti" else ("Acerto", "Erro", "Omissão", "Interrompida")
             latency = trial.get("reaction_us") if module == "rti" else trial["elapsed_us"] if outcome in (0, 1) else None
             context = f"{trial['pairs']} pares · rodada {trial['round']}" if module == "pal" else "—"
-            values = (module.upper(), "Treino" if trial["training"] else "Avaliação", str(counters[group]),
+            values = (f"{module.upper()} · {trial['run']}", "Treino" if trial["training"] else "Avaliação", str(counters[group]),
                       names[outcome], number(latency / 1000 if latency is not None else None, digits=1), context)
             for column, value in enumerate(values):
                 self.table.setItem(index, column, QTableWidgetItem(value))

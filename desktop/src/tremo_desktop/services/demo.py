@@ -24,7 +24,7 @@ def populate_demo(path):
                 if not drop:
                     repository.ingest(decode(topic, json.dumps(event).encode()))
 
-            emit("start", dict(kind=kind, duration_ms=30000, sample_ms=40,
+            emit("start", dict(patient_id="PAC-DEMO", kind=kind, duration_ms=30000, sample_ms=40,
                                tests_mask=15, tremor_first=False, protocol="tremo-adaptado-v1"))
             if kind == 6:
                 for module, training_count, test_count in (("mot", 3, 10), ("rti", 3, 10), ("prm", 2, 6), ("pal", 2, 9)):

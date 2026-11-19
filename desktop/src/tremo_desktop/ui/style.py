@@ -41,3 +41,15 @@ QHeaderView::section { background: #eef4f5; color: #5c747e; border: none; paddin
 QStatusBar { background: #ffffff; border-top: 1px solid #dce5e7; color: #647c85; }
 QToolTip { background: #203d47; color: white; border: none; padding: 7px; }
 """
+
+STYLE += """
+QFrame#sidebar { background: #102f39; }
+QLabel#brand, QLabel#network { color: #e7f6f4; }
+QPushButton#navigation { background: transparent; color: #d7ebeb; border: none; text-align: left; padding: 14px; }
+QPushButton#navigation:checked { background: #116b70; color: white; }
+QLabel#heading { font-size: 34px; color: #102447; }
+QLabel#identity { font-size: 19px; font-weight: 650; color: #142743; }
+QLabel#scoreSmall { font-size: 16px; font-weight: 650; color: #142743; }
+QLabel#badge { border-radius: 9px; padding: 5px 10px; background: #e6f4f1; color: #136963; }
+QLabel#overviewNote { padding: 12px; border-left: 4px solid #0d938e; background: #e7eff7; }
+"""

@@ -53,6 +53,9 @@ class DashboardUITests(unittest.TestCase):
 
     def test_navigation_filters_trials_and_charts(self):
         window = self.window
+        self.assertEqual(window.pages.currentIndex(), 0)
+        window.overview.history.click()
+        self.assertEqual(window.pages.currentIndex(), 1)
         self.assertEqual(window.session_list.count(), 3)
         self.assertEqual(window.results.cards["mot"][1].text(), "80,0%")
         self.assertEqual(window.details.table.rowCount(), 35)
@@ -76,6 +79,7 @@ class DashboardUITests(unittest.TestCase):
 
     def test_zoom_drag_refresh_and_reset(self):
         window = self.window
+        window.pages.setCurrentIndex(1)
         window.tabs.setCurrentIndex(1)
         self.application.processEvents()
         for plot in window.tremor.plots * 3:

@@ -1,4 +1,7 @@
 """Navegação da janela. Consultas ficam no worker; cada revisão evita respostas antigas."""
+import os
+import sqlite3
+from hashlib import sha256
 from datetime import datetime
 from pathlib import Path
 from PySide6.QtCore import Qt, QThread, QTimer, Signal, Slot, QSize
@@ -12,6 +15,7 @@ from .results import ResultsPanel, DetailsPanel
 from .charts import TremorPanel
 from .settings import SettingsPanel
 from .about import AboutPanel
+from .overview import OverviewPanel
 from tremo_desktop.transport.mqtt import Collector
 
 
@@ -33,6 +37,19 @@ class DashboardWindow(QMainWindow):
         self.resize(1320, 900)
         self.setMinimumSize(1000, 720)
         self._build()
+        # Inicializa o coletor MQTT (nao no modo demo)
+        if not self.demo:
+            from tremo_desktop.storage.repository import Repository
+            Repository(self.path).close()
+            database_id = sha256(os.fsencode(self.path)).hexdigest()[:16]
+            self.collector = Collector(self.path, client_id=f"tremo-gui-{database_id}",
+                username=os.getenv("TREMO_MQTT_USER"), password=os.getenv("TREMO_MQTT_PASSWORD"),
+                on_confirmation=self.confirmation_received.emit)
+            self.settings.collector = self.collector
+            self.confirmation_received.connect(self.settings.on_confirmation)
+            self.collector.client.connect_async(os.getenv("TREMO_MQTT_HOST", "192.168.1.215"),
+                                               int(os.getenv("TREMO_MQTT_PORT", "1883")))
+            self.collector.client.loop_start()
         self.thread = QThread(self)
         self.worker = DashboardWorker()
         self.worker.moveToThread(self.thread)
@@ -54,29 +71,7 @@ class DashboardWindow(QMainWindow):
         self.state_filter.currentIndexChanged.connect(self.invalidate)
         self.session_list.currentItemChanged.connect(self._selection_changed)
         self.refresh_button.clicked.connect(self.invalidate)
-        # Inicializa o coletor MQTT (nao no modo demo)
-        if not self.demo:
-            from tremo_desktop.storage.repository import Repository
-            mqtt_repo = Repository(self.path)
-            self.collector = Collector(
-                mqtt_repo,
-                client_id="tremo-dashboard-local",
-                on_confirmation=self._on_mqtt_confirmation_raw)
-            # Conecta o sinal para atualizacao thread-safe da UI
-            self.confirmation_received.connect(self._on_mqtt_confirmation)
-            # Inicia o loop de rede do MQTT em thread de background
-            self.collector.client.loop_start()
         QTimer.singleShot(0, self.refresh)
-
-    def _on_mqtt_confirmation_raw(self, confirmation):
-        """Recebe confirmacao na thread do MQTT e emite sinal para a thread Qt."""
-        self.confirmation_received.emit(confirmation)
-
-    @Slot(object)
-    def _on_mqtt_confirmation(self, confirmation):
-        """Processa confirmacao na thread da UI."""
-        if self.settings:
-            self.settings.on_confirmation(confirmation)
 
     def _build(self):
         root = QWidget()
@@ -86,13 +81,35 @@ class DashboardWindow(QMainWindow):
         horizontal.setSpacing(0)
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(282)
-        side = QVBoxLayout(sidebar)
-        side.setContentsMargins(20, 26, 20, 18)
-        side.setSpacing(14)
-        side.addWidget(label("tremo", "brand"))
-        side.addWidget(label("ACOMPANHAMENTO DE AVALIAÇÕES", "eyebrow"))
-        side.addSpacing(16)
+        sidebar.setFixedWidth(185)
+        nav = QVBoxLayout(sidebar)
+        nav.setContentsMargins(14, 30, 14, 18)
+        nav.addWidget(label("BitDogLab\nParkinson", "brand"))
+        nav.addSpacing(22)
+        self.pages = QStackedWidget()
+        for index, title in enumerate(("Visão Geral", "Histórico", "Configurações", "Sobre")):
+            button = QPushButton(title)
+            button.setObjectName("navigation")
+            button.setCheckable(True)
+            button.setAutoExclusive(True)
+            button.setChecked(index == 0)
+            button.clicked.connect(lambda checked, i=index: self.pages.setCurrentIndex(i))
+            self.pages.currentChanged.connect(lambda i, n=index, b=button: b.setChecked(i == n))
+            nav.addWidget(button)
+        nav.addStretch()
+        self.network_text = label("Demonstração" if self.demo else "MQTT desconectado", "network")
+        nav.addWidget(self.network_text)
+        horizontal.addWidget(sidebar)
+        horizontal.addWidget(self.pages, 1)
+        self.overview = OverviewPanel()
+        self.overview.history.clicked.connect(lambda: self.pages.setCurrentIndex(1))
+        self.pages.addWidget(self.overview)
+        history = QWidget()
+        history_layout = QHBoxLayout(history)
+        self.pages.addWidget(history)
+        filters = QWidget()
+        filters.setFixedWidth(225)
+        side = QVBoxLayout(filters)
         side.addWidget(label("Sessões", "section"))
         self.search = QLineEdit()
         self.search.setPlaceholderText("Buscar ID da sessão ou placa")
@@ -117,7 +134,7 @@ class DashboardWindow(QMainWindow):
         open_button.clicked.connect(self.open_database)
         side.addWidget(open_button)
         side.addWidget(label("A leitura local acompanha os dados gravados pelo coletor.", "muted"))
-        horizontal.addWidget(sidebar)
+        history_layout.addWidget(filters)
         workspace = QWidget()
         workspace.setObjectName("workspace")
         main = QVBoxLayout(workspace)
@@ -128,7 +145,7 @@ class DashboardWindow(QMainWindow):
         top = QHBoxLayout()
         titles = QVBoxLayout()
         titles.setSpacing(4)
-        titles.addWidget(label("Visão da avaliação", "heading"))
+        titles.addWidget(label("Histórico", "heading"))
         titles.addWidget(label("Resultados, movimento e qualidade da coleta", "muted"))
         top.addLayout(titles, 1)
         self.refresh_button = QPushButton("Atualizar")
@@ -176,7 +193,7 @@ class DashboardWindow(QMainWindow):
         self.details = DetailsPanel()
         self.settings = SettingsPanel(self.path, collector=self.collector)
         self.about = AboutPanel()
-        for widget, title in ((self.results, "Resultados cognitivos"), (self.tremor, "Tremores"), (self.details, "Detalhes da sessão"), (self.settings, "Configurações"), (self.about, "Sobre")):
+        for widget, title in ((self.results, "Resultados cognitivos"), (self.tremor, "Tremores"), (self.details, "Detalhes da sessão")):
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setWidget(widget)
@@ -185,7 +202,12 @@ class DashboardWindow(QMainWindow):
         self.stack.addWidget(self.content)
         main.addWidget(self.stack, 1)
         main.addWidget(label("Protocolo experimental adaptado · resultados para análise profissional, sem escores clínicos normativos", "muted"))
-        horizontal.addWidget(workspace, 1)
+        history_layout.addWidget(workspace, 1)
+        for panel in (self.settings, self.about):
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(panel)
+            self.pages.addWidget(scroll)
         self.statusBar().showMessage("Consultando banco local…")
 
     @Slot()
@@ -219,6 +241,11 @@ class DashboardWindow(QMainWindow):
             self.refresh(force=True)
             return
         changed = not self.snapshot or self.snapshot["selected"] != data["selected"]
+        self.overview.set_data(data.get("latest"))
+        if self.collector:
+            self.network_text.setText("MQTT conectado" if self.collector.client.is_connected() else "MQTT desconectado")
+            if self.settings.isVisible():
+                self.settings._refresh()
         self.snapshot = data
         self.selected = data["selected"]
         self.session_list.blockSignals(True)
@@ -287,6 +314,7 @@ class DashboardWindow(QMainWindow):
             self.refresh(force=True)
             return
         self.stack.setCurrentWidget(self.empty_page)
+        self.overview.set_data(None)
         self.empty_title.setText("Não foi possível consultar o banco")
         self.empty_text.setText("Verifique o arquivo e as permissões. Os resultados anteriores estão ocultos.\n" + message)
         self.statusBar().showMessage("Falha na consulta · tente atualizar ou abrir outro banco")
@@ -295,7 +323,20 @@ class DashboardWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Abrir banco de avaliações", str(self.path.parent),
                                              "SQLite (*.sqlite3 *.sqlite *.db);;Todos os arquivos (*)")
         if path:
-            self.path = Path(path).resolve()
+            from tremo_desktop.storage.repository import Repository
+            from PySide6.QtWidgets import QMessageBox
+            try:
+                Repository(path, read_only=True).close()
+            except (OSError, RuntimeError, sqlite3.Error) as exc:
+                QMessageBox.warning(self, "Abrir banco", str(exc))
+                return
+            if self.collector:
+                self.collector.client.disconnect()
+                self.collector.client.loop_stop()
+                self.collector = self.settings.collector = None
+                self.network_text.setText("Arquivo local")
+            self.settings.btn_new_patient.setEnabled(False)
+            self.path = self.settings.path = Path(path).resolve()
             self.selected = None
             self.snapshot = None
             self.search.clear()
@@ -305,8 +346,8 @@ class DashboardWindow(QMainWindow):
     def closeEvent(self, event):
         if self.collector:
             try:
-                self.collector.client.loop_stop()
                 self.collector.client.disconnect()
+                self.collector.client.loop_stop()
             except Exception:
                 pass
         if self.thread.isRunning():

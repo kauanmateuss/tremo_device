@@ -2,7 +2,7 @@
 
 Objetivo: consultar avaliações de forma organizada, com contexto da sessão,
 resultados por teste e qualidade dos registros. Implementado com PySide6 e
-PyQtGraph; a interface consome o SQLite produzido pelo coletor existente.
+PyQtGraph. O coletor MQTT integrado grava no SQLite e recebe as confirmações da placa.
 
 ## Instalar e abrir
 
@@ -35,20 +35,16 @@ A demonstração usa três sessões fictícias em um banco temporário, removido
 fechar normalmente. Um aviso permanece visível; ela não publica MQTT nem altera o
 banco real. Há exemplos de conclusão, interrupção com perdas e sessão em andamento.
 
-Para receber avaliações reais, mantenha o coletor em outro terminal, apontando
-**para o mesmo arquivo** utilizado na interface:
-
-```sh
-python -m tremo_desktop --db desktop/tremo.sqlite3 collect --host 192.168.1.215 --port 1883
-```
-
-A interface atualiza a leitura a cada 3 segundos. Esse intervalo é de consulta ao
-banco, não a frequência de amostragem dos sensores. Não indica conexão MQTT ativa.
-A coleta é iniciada e controlada na placa; fechar a janela não encerra o coletor.
+Para usar a placa, configure `TREMO_MQTT_HOST` e `TREMO_MQTT_PORT` e abra
+a GUI com o banco de trabalho. A GUI abre a conexão MQTT e atualiza as consultas
+a cada três segundos. O comando `collect` continua disponível para coleta sem janela.
 
 ## Uso
 
-- Selecione uma sessão pela lista; filtre pelo estado ou pesquise o ID da sessão
+- **Visão Geral** mostra a sessão mais recente, o paciente registrado no início e os resultados mais recentes de cada módulo. A aceleração RMS usa o MPU 1 nos últimos 60 segundos de dados, após remover a média de cada eixo.
+- **Configurações** permite cadastrar um identificador de até 16 caracteres (letras sem acento, dígitos, hífen ou sublinhado), selecionar a placa e associar, substituir ou remover o paciente. A confirmação da placa atualiza o banco. O firmware mantém a associação em RAM e anuncia seu estado ao reconectar. Após reiniciar a placa, associe o paciente novamente.
+- Na placa, abra **Sessões** e pressione A para iniciar. O clique no joystick volta ao menu. B solicita o encerramento e A confirma. Os testes individuais e a avaliação completa reutilizam a sessão aberta.
+- Em **Histórico**, Selecione uma sessão pela lista; filtre pelo estado ou pesquise o ID da sessão
   ou da placa. A busca consulta o banco inteiro, mostrando até 200 resultados
   mais recentes. IDs completos estão nos detalhes e podem ser copiados.
 - Consulte estado, duração ativa, tentativas recebidas e integridade. Estado
@@ -67,10 +63,9 @@ A coleta é iniciada e controlada na placa; fechar a janela não encerra o colet
   dos gráficos é limitada às primeiras 10.000 amostras de cada sensor, com aviso
   quando o limite for atingido; isso cobre as sessões de 30/60 s atuais.
 
-Não há vínculo entre sessão e paciente nesta etapa. Os registros são identificados
-por placa e sessão; cadastro de participantes, anotações e comparação longitudinal
-ficam para uma task específica. A interface não calcula diagnóstico, escores
-normativos ou frequência clínica do tremor.
+O histórico preserva o paciente registrado no início da sessão mesmo após trocar a
+associação da placa. Sessões antigas sem identificador permanecem sem paciente.
+Os detalhes discriminam as execuções repetidas e suas tentativas.
 
 ## Arquitetura e arquivos
 
