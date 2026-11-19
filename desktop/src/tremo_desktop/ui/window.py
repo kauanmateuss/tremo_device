@@ -12,10 +12,12 @@ from .results import ResultsPanel, DetailsPanel
 from .charts import TremorPanel
 from .settings import SettingsPanel
 from .about import AboutPanel
+from tremo_desktop.transport.mqtt import Collector
 
 
 class DashboardWindow(QMainWindow):
     requested = Signal(int, object)
+    confirmation_received = Signal(object)
 
     def __init__(self, path, demo=False):
         super().__init__()
@@ -26,6 +28,7 @@ class DashboardWindow(QMainWindow):
         self.revision = 0
         self.busy = False
         self.closing = False
+        self.collector = None
         self.setWindowTitle("Tremo · Dashboard de avaliações" + (" · Demonstração" if demo else ""))
         self.resize(1320, 900)
         self.setMinimumSize(1000, 720)
@@ -51,7 +54,29 @@ class DashboardWindow(QMainWindow):
         self.state_filter.currentIndexChanged.connect(self.invalidate)
         self.session_list.currentItemChanged.connect(self._selection_changed)
         self.refresh_button.clicked.connect(self.invalidate)
+        # Inicializa o coletor MQTT (nao no modo demo)
+        if not self.demo:
+            from tremo_desktop.storage.repository import Repository
+            mqtt_repo = Repository(self.path)
+            self.collector = Collector(
+                mqtt_repo,
+                client_id="tremo-dashboard-local",
+                on_confirmation=self._on_mqtt_confirmation_raw)
+            # Conecta o sinal para atualizacao thread-safe da UI
+            self.confirmation_received.connect(self._on_mqtt_confirmation)
+            # Inicia o loop de rede do MQTT em thread de background
+            self.collector.client.loop_start()
         QTimer.singleShot(0, self.refresh)
+
+    def _on_mqtt_confirmation_raw(self, confirmation):
+        """Recebe confirmacao na thread do MQTT e emite sinal para a thread Qt."""
+        self.confirmation_received.emit(confirmation)
+
+    @Slot(object)
+    def _on_mqtt_confirmation(self, confirmation):
+        """Processa confirmacao na thread da UI."""
+        if self.settings:
+            self.settings.on_confirmation(confirmation)
 
     def _build(self):
         root = QWidget()
@@ -149,7 +174,7 @@ class DashboardWindow(QMainWindow):
         self.results = ResultsPanel()
         self.tremor = TremorPanel()
         self.details = DetailsPanel()
-        self.settings = SettingsPanel(self.path)
+        self.settings = SettingsPanel(self.path, collector=self.collector)
         self.about = AboutPanel()
         for widget, title in ((self.results, "Resultados cognitivos"), (self.tremor, "Tremores"), (self.details, "Detalhes da sessão"), (self.settings, "Configurações"), (self.about, "Sobre")):
             scroll = QScrollArea()
@@ -278,6 +303,12 @@ class DashboardWindow(QMainWindow):
             self.invalidate()
 
     def closeEvent(self, event):
+        if self.collector:
+            try:
+                self.collector.client.loop_stop()
+                self.collector.client.disconnect()
+            except Exception:
+                pass
         if self.thread.isRunning():
             self.closing = True
             self.timer.stop()
