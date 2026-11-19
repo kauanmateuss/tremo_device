@@ -4,20 +4,26 @@ Inclui a tela de gerenciamento de pacientes e dispositivos, permitindo
 associar e desassociar um paciente a uma BitDogLab diretamente pela
 aplicacao desktop, enviando comandos via MQTT e aguardando confirmacao.
 """
+import os
+import secrets
 import sqlite3
+from pathlib import Path
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QFrame, QHBoxLayout,
     QPushButton, QComboBox, QLineEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox, QScrollArea)
-from PySide6.QtCore import QTimer
+    QHeaderView, QMessageBox, QFileDialog, QSpinBox, QFormLayout, QTabWidget)
+from PySide6.QtCore import QTimer, Signal, QSettings, QThreadPool, Slot
+from tremo_desktop.storage.export import export_database
 from .components import label, card
 
 
 class SettingsPanel(QWidget):
+    broker_changed = Signal(str, int)
+    exported = Signal(str)
+
     def __init__(self, path=None, collector=None):
         super().__init__()
         self.setObjectName("panel")
-        from pathlib import Path
         self.path = Path(path).resolve() if path else None
         self.collector = collector  # Collector MQTT para enviar comandos
         self.selected_patient = None
@@ -26,6 +32,67 @@ class SettingsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(26, 20, 26, 16)
         layout.setSpacing(16)
+
+        tabs = QTabWidget()
+        layout.addWidget(tabs)
+        patients = QWidget()
+        technical = QWidget()
+        tabs.addTab(patients, "Pacientes e dispositivos")
+        tabs.addTab(technical, "Conexão, sensores e dados")
+        outer = layout
+        layout = QVBoxLayout(patients)
+        tech = QVBoxLayout(technical)
+        self.preferences = QSettings("Tremo", "Dashboard")
+        self.host = QLineEdit(str(self.preferences.value("broker/host", os.getenv("TREMO_MQTT_HOST", "192.168.1.215"))))
+        self.port = QSpinBox()
+        self.port.setRange(1, 65535)
+        self.port.setValue(int(self.preferences.value("broker/port", os.getenv("TREMO_MQTT_PORT", "1883"))))
+        frame, box = card()
+        box.addWidget(label("Conexão MQTT · Mosquitto", "section"))
+        form = QFormLayout()
+        form.addRow("Endereço do broker", self.host)
+        form.addRow("Porta", self.port)
+        box.addLayout(form)
+        self.network = label("")
+        box.addWidget(self.network)
+        self.reconnect = QPushButton("Aplicar conexão")
+        self.reconnect.clicked.connect(self._change_broker)
+        box.addWidget(self.reconnect)
+        tech.addWidget(frame)
+        frame, box = card()
+        box.addWidget(label("Monitoramento dos MPUs", "section"))
+        box.addWidget(label("Acelerômetro e giroscópio · I²C0 · endereços 0x68 e 0x69. "
+                            "Os parâmetros se aplicam às próximas sessões até a placa reiniciar."))
+        self.mpu_device = QComboBox()
+        self.mpu_device.currentIndexChanged.connect(self._update_actions)
+        self.sample = QComboBox()
+        self.sample.addItem("25 Hz · 40 ms", 40)
+        self.sample.addItem("50 Hz · 20 ms", 20)
+        self.duration = QComboBox()
+        self.duration.addItem("30 s", 30000)
+        self.duration.addItem("60 s", 60000)
+        form = QFormLayout()
+        form.addRow("Dispositivo", self.mpu_device)
+        form.addRow("Amostragem", self.sample)
+        form.addRow("Duração da coleta", self.duration)
+        box.addLayout(form)
+        self.apply_mpu = QPushButton("Enviar parâmetros à placa")
+        self.apply_mpu.clicked.connect(self._configure_mpu)
+        box.addWidget(self.apply_mpu)
+        tech.addWidget(frame)
+        frame, box = card()
+        box.addWidget(label("Banco de avaliações", "section"))
+        self.db_location = label(str(self.path))
+        box.addWidget(self.db_location)
+        self.backup = QPushButton("Criar backup SQLite…")
+        self.export = QPushButton("Exportar resultados para CSV…")
+        self.backup.clicked.connect(lambda: self._export(False))
+        self.export.clicked.connect(lambda: self._export(True))
+        self.exported.connect(self._export_done)
+        box.addWidget(self.backup)
+        box.addWidget(self.export)
+        tech.addWidget(frame)
+        tech.addStretch()
 
         # Associação entre paciente e dispositivo
         assoc_frame, assoc_box = card()
@@ -113,8 +180,63 @@ class SettingsPanel(QWidget):
         self.timeout.timeout.connect(self._expired)
         self.pending = None
         self.feedback = label("", "muted")
-        layout.addWidget(self.feedback)
+        outer.addWidget(self.feedback)
         layout.addStretch()
+        self.associations = {}
+        self.device_states = {}
+        self.connection_timer = QTimer(self)
+        self.connection_timer.timeout.connect(self._update_actions)
+        self.connection_timer.start(1000)
+        self._update_actions()
+
+    def _change_broker(self):
+        host = self.host.text().strip()
+        if not host or any(c.isspace() for c in host) or "/" in host:
+            self.feedback.setText("Informe um nome de servidor ou endereço IP.")
+            return
+        self.broker_changed.emit(host, self.port.value())
+
+    def _configure_mpu(self):
+        device = self.mpu_device.currentData()
+        request = secrets.token_hex(8)
+        try:
+            self.collector.publish_command(device, "configure_mpu", dict(request_id=request,
+                sample_ms=self.sample.currentData(), duration_ms=self.duration.currentData()))
+        except (ValueError, RuntimeError) as exc:
+            self.feedback.setText(str(exc))
+            return
+        self.pending = (device, request, "configure_mpu")
+        self.timeout.start(12000)
+        self.feedback.setText("Aguardando confirmação dos parâmetros pela placa.")
+        self._update_actions()
+
+    def _export(self, csv_results):
+        suffix = "csv" if csv_results else "sqlite3"
+        name = "resultados" if csv_results else "backup"
+        target, _ = QFileDialog.getSaveFileName(self, "Salvar em um novo arquivo",
+            str(self.path.with_name(f"{name}.{suffix}")), f"{suffix.upper()} (*.{suffix})")
+        if not target:
+            return
+        source = self.path
+        self.backup.setEnabled(False)
+        self.export.setEnabled(False)
+        self.feedback.setText("Exportando…")
+
+        def write():
+            try:
+                export_database(source, target, csv_results=csv_results)
+                message = f"Arquivo salvo em {target}"
+            except (ValueError, RuntimeError, OSError, sqlite3.Error) as exc:
+                message = f"Falha na exportação · {exc}"
+            self.exported.emit(message)
+
+        QThreadPool.globalInstance().start(write)
+
+    @Slot(str)
+    def _export_done(self, message):
+        self.backup.setEnabled(True)
+        self.export.setEnabled(True)
+        self.feedback.setText(message)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -140,7 +262,16 @@ class SettingsPanel(QWidget):
             self.device_combo.blockSignals(True)
             self.device_combo.clear()
             self.device_combo.addItem("Selecione um dispositivo", None)
-            self.device_states = {d["device_id"]: d["state"] for d in repository.devices()}
+            devices = repository.devices()
+            self.device_states = {d["device_id"]: d["state"] for d in devices}
+            prior = self.mpu_device.currentData()
+            self.mpu_device.blockSignals(True)
+            self.mpu_device.clear()
+            for device in devices:
+                self.mpu_device.addItem(device["device_id"], device["device_id"])
+            self.mpu_device.setCurrentIndex(max(0, self.mpu_device.findData(prior)))
+            self.mpu_device.blockSignals(False)
+            self.db_location.setText(str(self.path))
             for d in repository.devices():
                 self.device_combo.addItem(
                     f"{d['device_id']}" + (f" — {d['firmware_version']}" if d['firmware_version'] else "") + f" · {d['state']}",
@@ -182,6 +313,11 @@ class SettingsPanel(QWidget):
         self._update_actions()
 
     def _update_actions(self):
+        connected = bool(self.collector and self.collector.client.is_connected())
+        self.network.setText(("Conectado" if connected else "Desconectado") if self.collector else "Consulta local")
+        self.reconnect.setEnabled(bool(self.collector) and not self.pending)
+        target = self.mpu_device.currentData()
+        self.apply_mpu.setEnabled(bool(connected and not self.pending and target and self.device_states.get(target) != "offline"))
         patient = self.selected_patient
         device = self.selected_device
         current = self.associations.get(device)
@@ -215,6 +351,14 @@ class SettingsPanel(QWidget):
         self._update_actions()
 
     def on_confirmation(self, confirmation):
+        if confirmation["confirmation"] == "mpu_configured":
+            if self.pending == (confirmation["device"], confirmation["data"]["request_id"], "configure_mpu"):
+                self.timeout.stop()
+                self.pending = None
+                self.feedback.setText("Parâmetros aplicados pela placa." if confirmation["status"] == "ok"
+                                      else "A placa recusou os parâmetros. Confira se há uma sessão ativa.")
+                self._update_actions()
+            return
         command = {"association_confirmed": "associate_patient",
                    "disassociation_confirmed": "disassociate_patient"}.get(confirmation["confirmation"])
         if self.pending == (confirmation["device"], confirmation["data"]["patient_id"], command):

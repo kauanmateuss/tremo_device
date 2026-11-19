@@ -1,6 +1,7 @@
 #include "communication.h"
 #include "telemetry.h"
 #include "patient_assoc.h"
+#include "session.h"
 #ifndef PICO_PROGRAM_VERSION_STRING
 #define PICO_PROGRAM_VERSION_STRING "0.1"
 #endif
@@ -41,6 +42,55 @@ static char sending[TELEMETRY_PAYLOAD];
 static char command_payload[192];
 static size_t command_length, command_expected;
 static bool response_due;
+
+// TaskMQTT recebe o pedido; apenas a task dona da sessão altera a configuração.
+#ifdef TREMO_FREERTOS_ENABLED
+#define MPU_LOCK() taskENTER_CRITICAL()
+#define MPU_UNLOCK() taskEXIT_CRITICAL()
+#else
+#define MPU_LOCK() ((void)0)
+#define MPU_UNLOCK() ((void)0)
+#endif
+static enum { MPU_IDLE, MPU_PENDING, MPU_REPLY } mpu_state;
+static struct {
+    char id[17];
+    unsigned sample_ms, duration_ms;
+    bool ok;
+} mpu_request;
+
+static bool reply_mpu(const char *id, bool ok) {
+    char payload[160];
+    int n = snprintf(payload, sizeof(payload),
+        "{\"v\":2,\"device\":\"%s\",\"confirmation\":\"mpu_configured\","
+        "\"status\":\"%s\",\"data\":{\"request_id\":\"%s\"}}",
+        patient_assoc_device_id(), ok ? "ok" : "error", id);
+    return n > 0 && (size_t)n < sizeof(payload) &&
+        mqtt_publish(client, topic_conf, payload, n, 1, 0, NULL, NULL) == ERR_OK;
+}
+
+static bool receive_mpu_request(void) {
+    char device[17], id[17];
+    unsigned sample, duration;
+    int consumed = 0;
+    int fields = sscanf(command_payload,
+        "{\"v\":2,\"device\":\"%16[0-9a-f]\",\"command\":\"configure_mpu\","
+        "\"data\":{\"request_id\":\"%16[0-9a-f]\",\"sample_ms\":%2u,\"duration_ms\":%5u}}%n",
+        device, id, &sample, &duration, &consumed);
+    if (fields != 4 || (size_t)consumed != command_length || strlen(id) != 16 ||
+        strcmp(device, patient_assoc_device_id())) return false;
+    MPU_LOCK();
+    bool busy = mpu_state != MPU_IDLE;
+    bool duplicate = busy && !strcmp(mpu_request.id, id);
+    if (!busy) {
+        strcpy(mpu_request.id, id);
+        mpu_request.sample_ms = sample;
+        mpu_request.duration_ms = duration;
+        mpu_state = MPU_PENDING;
+    }
+    MPU_UNLOCK();
+    if (busy && !duplicate) reply_mpu(id, false);
+    return true;
+}
 
 #ifdef TREMO_FREERTOS_ENABLED
 static communication_status_t cached_status = COMM_NO_RADIO;
@@ -107,6 +157,7 @@ static void incoming_data(void *arg, const uint8_t *data, uint16_t len, uint8_t 
     expecting_command = false;
     if (command_length != command_expected) return;
     command_payload[command_length] = 0;
+    if (receive_mpu_request()) return;
     char device[17], action[32], patient[17];
     int consumed = 0;
     // Formato compacto emitido por encode_command. Verifica todos os campos antes da alteração.
@@ -241,6 +292,14 @@ static void service_network(communication_mode_t mode) {
         patient_assoc_copy(patient);
         if (publish_response("device_state", patient, true, true)) response_due = false;
     }
+    MPU_LOCK();
+    bool reply_ready = mpu_state == MPU_REPLY;
+    MPU_UNLOCK();
+    if (reply_ready && reply_mpu(mpu_request.id, mpu_request.ok)) {
+        MPU_LOCK();
+        mpu_state = MPU_IDLE;
+        MPU_UNLOCK();
+    }
     if (inflight && now - sent_us > 15000000) {
         disconnect_client(); retry(); return;
     }
@@ -285,6 +344,15 @@ communication_status_t communication_status(void) {
 }
 
 void communication_update(communication_mode_t mode) {
+    MPU_LOCK();
+    if (mpu_state == MPU_PENDING) {
+        session_config_t config = *session_config();
+        config.sample_ms = mpu_request.sample_ms;
+        config.duration_ms = mpu_request.duration_ms;
+        mpu_request.ok = session_configure(config);
+        mpu_state = MPU_REPLY;
+    }
+    MPU_UNLOCK();
 #ifdef TREMO_FREERTOS_ENABLED
     (void)mode; // A TaskMQTT atende a rede independentemente da FSM.
 #else

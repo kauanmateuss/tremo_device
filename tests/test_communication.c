@@ -17,6 +17,14 @@ static void send_command(const char *action, const char *patient) {
     incoming_data(NULL, (const uint8_t *)json, 9, 0);
     incoming_data(NULL, (const uint8_t *)json + 9, len - 9, MQTT_DATA_FLAG_LAST);
 }
+static void configure_mpu(void) {
+    const char json[] = "{\"v\":2,\"device\":\"abcdef0123456789\",\"command\":\"configure_mpu\","
+        "\"data\":{\"request_id\":\"0000000000000001\",\"sample_ms\":20,\"duration_ms\":60000}}";
+    incoming_topic(NULL, "tremo/v1/devices/abcdef0123456789/commands", strlen(json));
+    incoming_data(NULL, (const uint8_t *)json, strlen(json), MQTT_DATA_FLAG_LAST);
+    communication_update(COMM_NORMAL);
+    assert(strstr(confirmation, "mpu_configured") && strstr(confirmation, "0000000000000001"));
+}
 static uint64_t now;
 static mqtt_client_t network;
 static mqtt_connection_cb_t connect_cb;
@@ -135,6 +143,11 @@ int main(void) {
     assert(publish_cb && telemetry_pending() == 1);
     publish_cb(publish_arg, ERR_OK);
     assert(!telemetry_pending());
+    configure_mpu();
+    assert(strstr(confirmation, "ok") && session_config()->sample_ms == 20 && session_config()->duration_ms == 60000);
+    assert(session_begin(SESSION_MOT, now));
+    configure_mpu();
+    assert(strstr(confirmation, "error"));
     puts("PASS MQTT: ID, QoS, PUBACK, pausa, reenvio, memoria, timeout e reconexao");
     return 0;
 }

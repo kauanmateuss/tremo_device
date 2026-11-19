@@ -44,15 +44,9 @@ class DashboardWindow(QMainWindow):
         if not self.demo:
             from tremo_desktop.storage.repository import Repository
             Repository(self.path).close()
-            database_id = sha256(os.fsencode(self.path)).hexdigest()[:16]
-            self.collector = Collector(self.path, client_id=f"tremo-gui-{database_id}",
-                username=os.getenv("TREMO_MQTT_USER"), password=os.getenv("TREMO_MQTT_PASSWORD"),
-                on_confirmation=self.confirmation_received.emit)
-            self.settings.collector = self.collector
             self.confirmation_received.connect(self.settings.on_confirmation)
-            self.collector.client.connect_async(os.getenv("TREMO_MQTT_HOST", "192.168.1.215"),
-                                               int(os.getenv("TREMO_MQTT_PORT", "1883")))
-            self.collector.client.loop_start()
+            self.settings.broker_changed.connect(self._save_broker)
+            self._connect_broker(self.settings.host.text(), self.settings.port.value())
         self.thread = QThread(self)
         self.worker = DashboardWorker()
         self.worker.moveToThread(self.thread)
@@ -77,6 +71,26 @@ class DashboardWindow(QMainWindow):
         self.session_list.currentItemChanged.connect(self._selection_changed)
         self.refresh_button.clicked.connect(self.invalidate)
         QTimer.singleShot(0, self.refresh)
+
+    def _connect_broker(self, host, port):
+        if self.collector:
+            self.collector.client.disconnect()
+            self.collector.client.loop_stop()
+        database_id = sha256(os.fsencode(self.path)).hexdigest()[:16]
+        default_broker = (os.getenv("TREMO_MQTT_HOST", "192.168.1.215"), int(os.getenv("TREMO_MQTT_PORT", "1883")))
+        use_credentials = (host, port) == default_broker
+        self.collector = Collector(self.path, client_id=f"tremo-gui-{database_id}",
+            username=os.getenv("TREMO_MQTT_USER") if use_credentials else None,
+            password=os.getenv("TREMO_MQTT_PASSWORD") if use_credentials else None,
+            on_confirmation=self.confirmation_received.emit)
+        self.settings.collector = self.collector
+        self.collector.client.connect_async(host, port)
+        self.collector.client.loop_start()
+
+    def _save_broker(self, host, port):
+        self._connect_broker(host, port)
+        self.settings.preferences.setValue("broker/host", host)
+        self.settings.preferences.setValue("broker/port", port)
 
     def _build(self):
         root = QWidget()

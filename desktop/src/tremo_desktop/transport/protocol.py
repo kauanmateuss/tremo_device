@@ -185,6 +185,15 @@ def valid_patient(value):
 
 def encode_command(device, command, data):
     """Codifica um comando para publicação no tópico de comandos."""
+    if command == "configure_mpu":
+        request = data.get("request_id")
+        sample, duration = data.get("sample_ms"), data.get("duration_ms")
+        if (not HEX.fullmatch(device) or not isinstance(request, str) or not HEX.fullmatch(request)
+                or type(sample) is not int or sample not in (20, 40)
+                or type(duration) is not int or duration not in (30000, 60000)):
+            raise InvalidMessage("Parâmetros de monitoramento inválidos")
+        return dict(v=2, device=device, command=command,
+                    data=dict(request_id=request, sample_ms=sample, duration_ms=duration))
     if not HEX.fullmatch(device) or command not in (COMMAND_ASSOCIATE, COMMAND_DISASSOCIATE) or not valid_patient(data.get("patient_id")):
         raise InvalidMessage("Dispositivo, comando ou paciente inválido")
     return dict(v=2, device=device, command=command, data={"patient_id": data["patient_id"]})
@@ -214,6 +223,11 @@ def decode_command(topic, payload):
             raise InvalidMessage("identificador inválido")
         if topic != topic_confirmations(e["device"]):
             raise InvalidMessage("dispositivo diverge do tópico")
+        if e["confirmation"] == "mpu_configured":
+            request = e["data"]["request_id"]
+            if not isinstance(request, str) or not HEX.fullmatch(request) or e["status"] not in ("ok", "error"):
+                raise InvalidMessage("Confirmação de monitoramento inválida")
+            return e
         if e["confirmation"] not in (CONFIRM_ASSOCIATION, CONFIRM_DISASSOCIATION, "device_state"):
             raise InvalidMessage("confirmação desconhecida")
         offline = e["confirmation"] == "device_state" and e["status"] == "offline"

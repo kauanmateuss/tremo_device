@@ -23,6 +23,8 @@ class Ingestion:
         """Aplica o estado confirmado pela placa antes do PUBACK."""
         device = confirmation["device"]
         confirm_type = confirmation["confirmation"]
+        if confirm_type == "mpu_configured":
+            return
         status = confirmation["status"]
         data = confirmation.get("data") or {}
         patient_id = data.get("patient_id")
