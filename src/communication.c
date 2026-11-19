@@ -1,5 +1,6 @@
 #include "communication.h"
 #include "telemetry.h"
+#include "patient_assoc.h"
 #include <stdio.h>
 #include <string.h>
 #include "pico/stdlib.h"
@@ -24,11 +25,14 @@ static mqtt_client_t *client;
 static struct mqtt_connect_client_info_t info;
 static ip_addr_t broker;
 static char client_id[24], topic[64];
+static char topic_cmd[64], topic_conf[64];
 static bool ready, connecting, inflight, suspended, deferred;
+static bool expecting_command;
 static uint64_t retry_us, wifi_retry_us, sent_us, connect_started_us;
 static uintptr_t publish_generation, connection_generation;
 static unsigned backoff_s = 1;
 static char sending[TELEMETRY_PAYLOAD];
+static patient_assoc_t assoc;
 #ifdef TREMO_FREERTOS_ENABLED
 static communication_status_t cached_status = COMM_NO_RADIO;
 static void task_network(void *parameter);
@@ -42,12 +46,23 @@ static void disconnect_client(void) {
     ++connection_generation; // Invalida callbacks de uma conexão encerrada.
     mqtt_disconnect(client);
 }
+static void mqtt_sub_request_cb(void *arg, err_t err);
+
 static void connection(mqtt_client_t *c, void *arg, mqtt_connection_status_t status) {
     (void)c;
     if ((uintptr_t)arg != connection_generation) return;
     connecting = false;
-    if (status == MQTT_CONNECT_ACCEPTED) { backoff_s = 1; }
-    else { inflight = false; retry(); }
+    if (status == MQTT_CONNECT_ACCEPTED) {
+        backoff_s = 1;
+        // Inscreve no topico de comandos para este dispositivo
+        snprintf(topic_cmd, sizeof(topic_cmd), "tremo/v1/devices/%s/commands", client_id);
+        snprintf(topic_conf, sizeof(topic_conf), "tremo/v1/devices/%s/confirmations", client_id);
+        if (mqtt_sub_unsub(client, topic_cmd, 1, mqtt_sub_request_cb, NULL, 1) != ERR_OK) {
+            // Falha na inscricao, nao critica - tenta novamente na proxima reconexao
+        }
+    } else {
+        inflight = false; retry();
+    }
 }
 static void published(void *arg, err_t err) {
     if (!inflight || (uintptr_t)arg != publish_generation) return;
@@ -55,11 +70,43 @@ static void published(void *arg, err_t err) {
     inflight = false;
     if (err != ERR_OK) { disconnect_client(); retry(); }
 }
+// Callback chamado quando o topico de uma mensagem recebida eh conhecido.
+static void mqtt_inpub_cb(void *arg, const char *topic, uint32_t topic_len) {
+    (void)arg;
+    if (!client) return;
+    // Se o topico eh de comandos, marcamos para processar os dados que vao chegar.
+    if (topic_cmd[0] != '\0' && strncmp(topic, topic_cmd, topic_len) == 0) {
+        expecting_command = true;
+    } else {
+        expecting_command = false;
+    }
+}
+
+static void mqtt_indata_cb(void *arg, const uint8_t *data, uint16_t len, u8_t flags) {
+    (void)arg; (void)flags;
+    if (!client || !expecting_command) return;
+    char payload[256];
+    uint16_t copy_len = len < sizeof(payload) - 1 ? len : sizeof(payload) - 1;
+    memcpy(payload, data, copy_len);
+    payload[copy_len] = '\0';
+    communication_process_command(topic_cmd, payload, strlen(payload));
+    expecting_command = false;
+}
+
+static void mqtt_sub_request_cb(void *arg, err_t err) {
+    (void)arg;
+    if (err != ERR_OK) {
+        ready = false;
+    }
+}
+
 static void start_network(void) {
     if (!ipaddr_aton(TREMO_MQTT_HOST, &broker) || cyw43_arch_init()) return;
     cyw43_arch_enable_sta_mode();
     client = mqtt_client_new();
     if (!client) return;
+    // Configura callbacks de recebimento de mensagens
+    mqtt_set_inpub_callback(client, mqtt_inpub_cb, mqtt_indata_cb, NULL);
     info = (struct mqtt_connect_client_info_t){.client_id = client_id, .keep_alive = 30,
         .client_user = TREMO_MQTT_USER[0] ? TREMO_MQTT_USER : NULL,
         .client_pass = TREMO_MQTT_USER[0] ? TREMO_MQTT_PASSWORD : NULL};
@@ -72,6 +119,8 @@ void communication_init(void) {
         if (device[i] >= 'A' && device[i] <= 'F') device[i] += 'a' - 'A';
     bool configured = TREMO_WIFI_SSID[0] != 0;
     telemetry_init(device, configured);
+    patient_assoc_init();
+    snprintf(assoc.device_id, sizeof(assoc.device_id), "%s", device);
     if (!configured) return;
     snprintf(client_id, sizeof(client_id), "tremo-%s", device);
     snprintf(topic, sizeof(topic), "tremo/v1/devices/%s/events", device);
@@ -100,15 +149,15 @@ static void service_network(communication_mode_t mode) {
         return; // Nenhum poll/IRQ de rede durante testes cognitivos (arquitetura poll).
     }
     if (suspended) { suspended = false; retry_us = 0; }
-    // Mesmo a associação "async" envia comandos síncronos ao rádio. Sem uma
-    // conexão utilizável, não entrar no driver durante a aquisição cronometrada.
+    // Mesmo a associacao "async" envia comandos sincronos ao radio. Sem uma
+    // conexao utilizavel, nao entrar no driver durante a aquisicao cronometrada.
     if (mode == COMM_STREAM_ONLY && (deferred || read_status() != COMM_ONLINE)) {
         deferred = true;
         return;
     }
     if (deferred) {
-        // A conexão pode ter expirado enquanto o poll ficou parado. O evento
-        // sem PUBACK continua na fila e será reenviado pela nova conexão.
+        // A conexao pode ter expirado enquanto o poll ficou parado. O evento
+        // sem PUBACK continua na fila e sera reenviado pela nova conexao.
         disconnect_client();
         deferred = false;
         retry_us = 0;
@@ -192,6 +241,112 @@ void communication_update(communication_mode_t mode) {
     (void)mode; // A TaskMQTT atende a rede independentemente da FSM.
 #else
     service_network(mode);
+#endif
+}
+
+// Publica confirmacao de associacao no topico de confirmacoes.
+bool communication_publish_confirm_assoc(const char *patient_id, bool success) {
+#if TREMO_MQTT_ENABLED
+    if (!client || !mqtt_client_is_connected(client)) return false;
+    char payload[128];
+    int n = snprintf(payload, sizeof(payload),
+        "{\"v\":2,\"device\":\"%s\",\"confirmation\":\"association_confirmed\","
+        "\"status\":\"%s\",\"data\":{\"patient_id\":\"%s\"}}",
+        client_id, success ? "ok" : "error", patient_id ? patient_id : "");
+    if (n < 0 || n >= (int)sizeof(payload)) return false;
+    if (inflight) return false; // Ja ha uma mensagem em voo
+    inflight = true;
+    sent_us = time_us_64();
+    ++publish_generation;
+    if (mqtt_publish(client, topic_conf, payload, strlen(payload), 1, 0,
+                     published, (void *)publish_generation) != ERR_OK) {
+        inflight = false;
+        return false;
+    }
+    return true;
+#else
+    (void)patient_id; (void)success;
+    return false;
+#endif
+}
+
+// Publica confirmacao de desassociacao no topico de confirmacoes.
+bool communication_publish_confirm_disassoc(bool success) {
+#if TREMO_MQTT_ENABLED
+    if (!client || !mqtt_client_is_connected(client)) return false;
+    char payload[128];
+    const char *pid = patient_assoc_has_patient() ? patient_assoc_patient_id() : "";
+    int n = snprintf(payload, sizeof(payload),
+        "{\"v\":2,\"device\":\"%s\",\"confirmation\":\"disassociation_confirmed\","
+        "\"status\":\"%s\",\"data\":{\"patient_id\":\"%s\"}}",
+        client_id, success ? "ok" : "error", pid);
+    if (n < 0 || n >= (int)sizeof(payload)) return false;
+    if (inflight) return false;
+    inflight = true;
+    sent_us = time_us_64();
+    ++publish_generation;
+    if (mqtt_publish(client, topic_conf, payload, strlen(payload), 1, 0,
+                     published, (void *)publish_generation) != ERR_OK) {
+        inflight = false;
+        return false;
+    }
+    return true;
+#else
+    (void)success;
+    return false;
+#endif
+}
+
+// Processa um comando recebido no topico de comandos.
+// Espera JSON no formato: {"v":2,"device":"...","command":"associate_patient","data":{"patient_id":"..."}}
+void communication_process_command(const char *topic, const char *payload, size_t payload_len) {
+#if TREMO_MQTT_ENABLED
+    (void)topic;
+    if (!payload || payload_len == 0 || payload_len > 255) return;
+
+    // Parsing simples do JSON do comando
+    char cmd_buf[64] = {0};
+    char patient_buf[PATIENT_ID_MAX + 1] = {0};
+
+    // Extrai o comando
+    const char *cmd_key = "\"command\":\"";
+    const char *cmd_pos = strstr(payload, cmd_key);
+    if (cmd_pos) {
+        cmd_pos += strlen(cmd_key);
+        size_t i = 0;
+        while (*cmd_pos && *cmd_pos != '"' && i < sizeof(cmd_buf) - 1) {
+            cmd_buf[i++] = *cmd_pos++;
+        }
+        cmd_buf[i] = '\0';
+    }
+
+    // Extrai o patient_id do data
+    const char *pid_key = "\"patient_id\":\"";
+    const char *pid_pos = strstr(payload, pid_key);
+    if (pid_pos) {
+        pid_pos += strlen(pid_key);
+        size_t i = 0;
+        while (*pid_pos && *pid_pos != '"' && i < sizeof(patient_buf) - 1) {
+            patient_buf[i++] = *pid_pos++;
+        }
+        patient_buf[i] = '\0';
+    }
+
+    if (strcmp(cmd_buf, "associate_patient") == 0) {
+        if (patient_assoc_request_associate(patient_buf[0] ? patient_buf : NULL)) {
+            communication_publish_confirm_assoc(patient_buf, true);
+        } else {
+            communication_publish_confirm_assoc(NULL, false);
+        }
+    } else if (strcmp(cmd_buf, "disassociate_patient") == 0) {
+        if (patient_assoc_request_disassociate()) {
+            communication_publish_confirm_disassoc(true);
+        } else {
+            communication_publish_confirm_disassoc(false);
+        }
+    }
+#else
+    (void)payload; (void)payload_len;
 #endif
 }
 

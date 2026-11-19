@@ -61,6 +61,7 @@ add_executable(tremo_device main.c
             src/telemetry.c
             src/communication.c
             src/session.c
+            src/patient_assoc.c
             src/assessment.c
             src/app.c)
 
