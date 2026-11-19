@@ -77,6 +77,8 @@ def load_dashboard(path, selected=None, query="", state=None, overview_device=No
     try:
         # Todas as consultas enxergam o mesmo instante, mesmo com coleta em paralelo.
         repository.db.execute("BEGIN")
+        result["firmware_versions"] = [tuple(row) for row in repository.db.execute(
+            "SELECT device_id, firmware_version FROM devices ORDER BY device_id")]
         result["latest"] = latest_overview(repository, overview_device)
         report = (result["latest"] or {}).get("report", {})
         key = (report.get("device"), report.get("session"))

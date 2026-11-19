@@ -334,6 +334,7 @@ class DashboardWindow(QMainWindow):
             self.refresh(force=True)
             return
         changed = not self.snapshot or self.snapshot["selected"] != data["selected"]
+        self.about.set_firmware(data.get("firmware_versions", []))
         self.overview.set_data(data.get("latest"))
         if self.collector:
             self.network_text.setText("MQTT conectado" if self.collector.client.is_connected() else "MQTT desconectado")
@@ -438,6 +439,7 @@ class DashboardWindow(QMainWindow):
                 self.network_text.setText("Arquivo local")
             self.settings.btn_new_patient.setEnabled(False)
             self.path = self.settings.path = Path(path).resolve()
+            self.about.set_firmware([])
             self.selected = None
             self.snapshot = None
             self.reference = None

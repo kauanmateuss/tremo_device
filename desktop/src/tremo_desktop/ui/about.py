@@ -1,6 +1,23 @@
-"""Aba Sobre: informações do projeto, software e hardware."""
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame
-from .components import label, card
+"""Informações do projeto e versões observadas pela aplicação."""
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+import tomllib
+
+from PySide6.QtWidgets import QWidget, QVBoxLayout
+
+from .components import card, label
+
+
+def desktop_version():
+    try:
+        return version("tremo-desktop")
+    except PackageNotFoundError:
+        # Na execução direta a partir do repositório, o pacote pode não estar instalado.
+        project = Path(__file__).resolve().parents[3] / "pyproject.toml"
+        if project.is_file():
+            with project.open("rb") as stream:
+                return tomllib.load(stream)["project"]["version"]
+        return "não informada"
 
 
 class AboutPanel(QWidget):
@@ -10,40 +27,36 @@ class AboutPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(26, 20, 26, 16)
         layout.setSpacing(16)
+        layout.addWidget(label("BitDogLab Parkinson", "heading"))
+        layout.addWidget(label("O Tremo registra sinais de movimento e resultados de MOT, RTI, PRM e PAL "
+                               "para acompanhar as avaliações de pessoas com Parkinson.", "muted"))
 
-        brand = QLabel("🧠")
-        brand.setStyleSheet("font-size: 40px; background: transparent;")
-        layout.addWidget(brand)
-        layout.addWidget(label("BitDogLab Parkinson — Dashboard", "heading"))
-        layout.addWidget(label("Aplicativo desktop para consulta de avaliações de monitoramento de Parkinson.", "muted"))
+        project, box = card()
+        box.addWidget(label("Equipe e instituição", "section"))
+        box.addWidget(label("Kauan Mateus Vidal de Brito\nThiago Roberto Lima Ribeiro\nJoao Emanuel"))
+        box.addWidget(label("Universidade Federal do Vale do São Francisco", "muted"))
+        layout.addWidget(project)
 
-        info_frame, info_box = card()
-        info_box.setSpacing(8)
-        info_box.addWidget(label("Projeto", "section"))
-        for linha in (
-            "Dispositivo: BitDogLab (Raspberry Pi Pico W)",
-            "Firmware: telemetria MQTT com sessões e testes cognitivos (MOT, RTI, PRM, PAL)",
-            "Armazenamento: SQLite via coletor desktop (WAL, foreign_keys)",
-            "Interface: PySide6 + PyQtGraph",
-        ):
-            info_box.addWidget(label(linha, "muted"))
-        layout.addWidget(info_frame)
+        stack, box = card()
+        box.addWidget(label("Dispositivo e tecnologias", "section"))
+        box.addWidget(label("BitDogLab com Raspberry Pi Pico W e microcontrolador RP2040. "
+                            "Os sensores MPU registram aceleração e velocidade angular."))
+        box.addWidget(label("Firmware em C com Pico SDK e FreeRTOS. Comunicação MQTT via Mosquitto. "
+                            "Aplicativo em Python com PySide6, PyQtGraph, Paho MQTT e SQLite.", "muted"))
+        layout.addWidget(stack)
 
-        tech_frame, tech_box = card()
-        tech_box.setSpacing(8)
-        tech_box.addWidget(label("Versões", "section"))
-        for linha in (
-            "Dashboard: v0.1.0",
-            "Protocolo tremo: adaptado-v1",
-            "Python: 3.11+",
-            "PySide6: 6.x",
-        ):
-            tech_box.addWidget(label(linha, "muted"))
-        layout.addWidget(tech_frame)
-
+        versions, box = card()
+        box.addWidget(label("Versões", "section"))
+        box.addWidget(label(f"Aplicação desktop · {desktop_version()}"))
+        box.addWidget(label("Firmware informado por dispositivo", "muted"))
+        self.firmware = label("")
+        self.set_firmware([])
+        box.addWidget(self.firmware)
+        layout.addWidget(versions)
         layout.addStretch()
+        layout.addWidget(label("Protocolo experimental adaptado · resultados para análise profissional, "
+                               "sem escores clínicos normativos.", "muted"))
 
-        nota = QLabel("Protocolo experimental adaptado · resultados para análise profissional, sem escores clínicos normativos.")
-        nota.setWordWrap(True)
-        nota.setStyleSheet("color: #647c85; font-size: 11px; background: transparent;")
-        layout.addWidget(nota)
+    def set_firmware(self, devices):
+        rows = [f"{device} · {firmware or 'versão não informada'}" for device, firmware in devices]
+        self.firmware.setText("\n".join(rows) or "Nenhum dispositivo registrado neste banco.")

@@ -80,6 +80,17 @@ class DashboardUITests(unittest.TestCase):
         self.wait_for(lambda: window.snapshot["report"] is None)
         self.assertIs(window.stack.currentWidget(), window.empty_page)
 
+    def test_about_displays_reported_firmware_without_a_session(self):
+        from tremo_desktop.storage.repository import Repository
+        from contextlib import closing
+        with closing(Repository(self.path)) as repo:
+            repo.create_device("00000000000000af", "0.3-teste")
+            repo.create_device("00000000000000bf", "")
+        self.window.pages.setCurrentIndex(3)
+        self.window.invalidate()
+        self.wait_for(lambda: "00000000000000af · 0.3-teste" in self.window.about.firmware.text())
+        self.assertIn("00000000000000bf · versão não informada", self.window.about.firmware.text())
+
     def test_compare_reference_across_filters(self):
         w = self.window
         w.pages.setCurrentIndex(1)
