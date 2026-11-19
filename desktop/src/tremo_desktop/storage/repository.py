@@ -20,13 +20,13 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS trials (
  device TEXT NOT NULL, session TEXT NOT NULL, module TEXT NOT NULL, trial_index INTEGER NOT NULL,
  training INTEGER NOT NULL, outcome INTEGER NOT NULL, latency_us INTEGER, data TEXT NOT NULL,
- PRIMARY KEY(device,session,module,trial_index), FOREIGN KEY(device,session) REFERENCES sessions(device,session));
+ run INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(device,session,run,module,trial_index), FOREIGN KEY(device,session) REFERENCES sessions(device,session));
 CREATE TABLE IF NOT EXISTS samples (
  device TEXT NOT NULL, session TEXT NOT NULL, sequence INTEGER NOT NULL, t_us INTEGER NOT NULL,
  sensor INTEGER NOT NULL, valid INTEGER NOT NULL, read_us INTEGER NOT NULL,
  ax INTEGER, ay INTEGER, az INTEGER, raw_gx INTEGER, raw_gy INTEGER, raw_gz INTEGER,
  gx INTEGER, gy INTEGER, gz INTEGER,
- PRIMARY KEY(device,session,sequence), FOREIGN KEY(device,session) REFERENCES sessions(device,session));
+ run INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(device,session,run,sequence), FOREIGN KEY(device,session) REFERENCES sessions(device,session));
 CREATE TABLE IF NOT EXISTS results (
  device TEXT NOT NULL, session TEXT NOT NULL, module TEXT NOT NULL, seq INTEGER NOT NULL, data TEXT NOT NULL,
  PRIMARY KEY(device,session,module), FOREIGN KEY(device,session) REFERENCES sessions(device,session));
@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS patient_devices (
  FOREIGN KEY(patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE,
  FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE);
 CREATE INDEX IF NOT EXISTS samples_time ON samples(device,session,sensor,t_us);
-PRAGMA user_version=6;
+
 """
 
 
@@ -75,63 +75,59 @@ class Repository:
         try:
             self.db.execute("PRAGMA foreign_keys=ON")
             version = self.db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in ((1, 2, 3, 4, 5, 6) if read_only else (0, 1, 2, 3, 4, 5, 6)):
+            if version not in range(8) or (read_only and version == 0):
                 raise RuntimeError("Versão do banco não suportada")
+            if read_only and version < 7:
+                archive = self.db
+                self.db = sqlite3.connect(":memory:")
+                try:
+                    archive.backup(self.db)
+                finally:
+                    archive.close()
+                self.db.row_factory = sqlite3.Row
+                self._migrate()
+                self.db.commit()
+                self.db.execute("PRAGMA query_only=ON")
             if not read_only:
                 self.db.execute("PRAGMA journal_mode=WAL")
                 self.db.execute("PRAGMA synchronous=FULL")
-                if version == 0:
-                    self.db.executescript("BEGIN;" + SCHEMA + "COMMIT;")
-                elif version == 1:
-                    self.db.executescript(
-                        "BEGIN;"
-                        "CREATE TABLE IF NOT EXISTS devices ("
-                        " device_id TEXT PRIMARY KEY, firmware_version TEXT NOT NULL, state TEXT NOT NULL,"
-                        " created_at TEXT NOT NULL, updated_at TEXT NOT NULL);"
-                        "PRAGMA user_version=2;"
-                        "COMMIT;"
-                    )
-                elif version == 2:
-                    self.db.executescript(
-                        "BEGIN;"
-                        "CREATE TABLE IF NOT EXISTS patients ("
-                        " patient_id TEXT PRIMARY KEY, name TEXT, created_at TEXT NOT NULL);"
-                        "PRAGMA user_version=3;"
-                        "COMMIT;"
-                    )
-                elif version == 3:
-                    self.db.executescript(
-                        "BEGIN;"
-                        "CREATE TABLE IF NOT EXISTS patient_devices ("
-                        " patient_id TEXT NOT NULL, device_id TEXT NOT NULL, associated_at TEXT NOT NULL,"
-                        " PRIMARY KEY(patient_id, device_id),"
-                        " FOREIGN KEY(patient_id) REFERENCES patients(patient_id) ON DELETE CASCADE,"
-                        " FOREIGN KEY(device_id) REFERENCES devices(device_id) ON DELETE CASCADE);"
-                        "PRAGMA user_version=4;"
-                        "COMMIT;"
-                    )
-                elif version == 4:
-                    self.db.executescript(
-                        "BEGIN;"
-                        "ALTER TABLE sessions ADD COLUMN patient_id TEXT REFERENCES patients(patient_id);"
-                        "PRAGMA user_version=5;"
-                        "COMMIT;"
-                    )
-                elif version == 5:
-                    self.db.executescript(
-                        "BEGIN;"
-                        "CREATE TABLE IF NOT EXISTS test_runs ("
-                        " run_id INTEGER PRIMARY KEY AUTOINCREMENT, device TEXT NOT NULL, session TEXT NOT NULL,"
-                        " module TEXT NOT NULL, run_number INTEGER NOT NULL, started_at TEXT, finished_at TEXT,"
-                        " state TEXT, data TEXT,"
-                        " FOREIGN KEY(device,session) REFERENCES sessions(device,session),"
-                        " UNIQUE(device,session,module,run_number));"
-                        "PRAGMA user_version=6;"
-                        "COMMIT;"
-                    )
+                self.db.execute("BEGIN IMMEDIATE")
+                if self.db.execute("PRAGMA user_version").fetchone()[0] < 7:
+                    self._migrate()
+                self.db.commit()
         except Exception:
             self.db.close()
             raise
+
+    def _migrate(self):
+        legacy = []
+        for table in ("trials", "samples"):
+            columns = [r[1] for r in self.db.execute(f"PRAGMA table_info({table})")]
+            if columns and "run" not in columns:
+                self.db.execute(f"ALTER TABLE {table} RENAME TO {table}_legacy")
+                legacy.append((table, ",".join(columns)))
+        self.db.execute("DROP INDEX IF EXISTS samples_time")
+        for statement in SCHEMA.split(";"):
+            if statement.strip():
+                self.db.execute(statement)
+        for table, columns in legacy:
+            self.db.execute(f"INSERT INTO {table}({columns}) SELECT {columns} FROM {table}_legacy")
+            self.db.execute(f"DROP TABLE {table}_legacy")
+        if "patient_id" not in [r[1] for r in self.db.execute("PRAGMA table_info(sessions)")]:
+            self.db.execute("ALTER TABLE sessions ADD COLUMN patient_id TEXT REFERENCES patients(patient_id)")
+        self.db.execute("""INSERT OR IGNORE INTO devices
+            SELECT device,'','identificado',min(received_first),max(received_last)
+            FROM sessions GROUP BY device""")
+        self.db.execute("""DELETE FROM patient_devices WHERE rowid NOT IN
+            (SELECT rowid FROM (SELECT rowid,row_number() OVER
+            (PARTITION BY device_id ORDER BY associated_at DESC,rowid DESC) AS pos
+            FROM patient_devices) WHERE pos=1)""")
+        self.db.execute("CREATE UNIQUE INDEX IF NOT EXISTS device_association ON patient_devices(device_id)")
+        self.db.execute("""INSERT OR IGNORE INTO test_runs(device,session,module,run_number,finished_at,state,data)
+            SELECT r.device,r.session,r.module,1,e.received_at,
+            CASE json_extract(r.data,'$.interrupted') WHEN 1 THEN 'interrompida' ELSE 'concluida' END,r.data
+            FROM results r JOIN events e USING(device,session,seq) WHERE r.module!='mpu'""")
+        self.db.execute("PRAGMA user_version=7")
 
     def close(self):
         self.db.close()
@@ -147,14 +143,20 @@ class Repository:
         payload, now = encoded(e), utc_now()
         try:
             with self.db:
+                self.db.execute("BEGIN IMMEDIATE")
                 previous = self.db.execute("SELECT payload FROM events WHERE device=? AND session=? AND seq=?", (*key, e["seq"])).fetchone()
                 if previous:
                     if previous[0] != payload: raise InvalidMessage("mesma identidade com conteúdo diferente")
                     return False
+                self.db.execute("INSERT OR IGNORE INTO devices VALUES(?,?,?,?,?)", (key[0], "", "identificado", now, now))
+                run = e.get("run", 0)
                 self.db.execute("INSERT INTO sessions(device,session,received_first,received_last) VALUES(?,?,?,?) ON CONFLICT(device,session) DO UPDATE SET received_last=excluded.received_last", (*key, now, now))
                 self.db.execute("INSERT INTO events VALUES(?,?,?,?,?,?,?)", (*key, e["seq"], e["type"], e["t_us"], payload, now))
                 if e["type"] == "start":
-                    self.db.execute("UPDATE sessions SET start_json=? WHERE device=? AND session=?", (encoded(d), *key))
+                    patient = d.get("patient_id")
+                    if patient:
+                        self.db.execute("INSERT OR IGNORE INTO patients(patient_id,created_at) VALUES(?,?)", (patient, now))
+                    self.db.execute("UPDATE sessions SET start_json=?,patient_id=? WHERE device=? AND session=?", (encoded(d), patient or None, *key))
                 if e["type"] in ("start", "state", "end"):
                     state = 1 if e["type"] == "start" else d["state"]
                     self.db.execute("UPDATE sessions SET state=?,state_seq=? WHERE device=? AND session=? AND state_seq<?", (state, e["seq"], *key, e["seq"]))
@@ -162,16 +164,29 @@ class Repository:
                     self.db.execute("UPDATE sessions SET end_json=?,end_seq=? WHERE device=? AND session=?", (encoded(d), e["seq"], *key))
                 elif e["type"] == "trial":
                     latency = d["reaction_us"] if d["module"] == "rti" else (d["elapsed_us"] if d["outcome"] in (0, 1) else None)
-                    self.db.execute("INSERT INTO trials VALUES(?,?,?,?,?,?,?,?)", (*key, d["module"], d["index"], d["training"], d["outcome"], latency, encoded(d)))
+                    self.db.execute("INSERT INTO trials VALUES(?,?,?,?,?,?,?,?,?)", (*key, d["module"], d["index"], d["training"], d["outcome"], latency, encoded(d), run))
+                elif e["type"] == "test_start":
+                    self.db.execute("""INSERT INTO test_runs(device,session,module,run_number,started_at,state)
+                        VALUES(?,?,?,?,?,'em_andamento') ON CONFLICT(device,session,module,run_number)
+                        DO UPDATE SET started_at=excluded.started_at""", (*key, d["module"], run, now))
                 elif e["type"] == "result":
+                    if d["module"] != "mpu":
+                        self.create_test_run_record(key, d, run or 1, now)
+
                     self.db.execute("INSERT INTO results VALUES(?,?,?,?,?) ON CONFLICT(device,session,module) DO UPDATE SET seq=excluded.seq,data=excluded.data WHERE excluded.seq>results.seq", (*key, d["module"], e["seq"], encoded(d)))
                 elif e["type"] == "samples":
                     for row in d["rows"]:
                         values = row[5:] if row[3] else [None] * 9
-                        self.db.execute("INSERT INTO samples VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (*key, *row[:5], *values))
+                        self.db.execute("INSERT INTO samples VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (*key, *row[:5], *values, run))
             return True
         except sqlite3.IntegrityError as exc:
             raise InvalidMessage("conflito entre registros da sessão") from exc
+
+    def create_test_run_record(self, key, data, number, now):
+        self.db.execute("""INSERT INTO test_runs(device,session,module,run_number,finished_at,state,data)
+            VALUES(?,?,?,?,?,?,?) ON CONFLICT(device,session,module,run_number)
+            DO UPDATE SET finished_at=excluded.finished_at,state=excluded.state,data=excluded.data""", (*key, data["module"], number, now,
+            "interrompida" if data["interrupted"] else "concluida", encoded(data)))
 
     def sessions(self, limit=100):
         return [dict(row) for row in self.db.execute(
@@ -193,10 +208,11 @@ class Repository:
         if end and end["tx_dropped"]: issues.append(f'{end["tx_dropped"]} mensagens descartadas no dispositivo')
         if expected is not None and any(n >= expected for n in seqs): issues.append("mensagens após encerramento")
         modules = {}
-        for result in self.db.execute("SELECT module,data FROM results WHERE device=? AND session=?", key):
+        for result in self.db.execute("SELECT module,data,seq FROM results WHERE device=? AND session=?", key):
             module, data = result["module"], json.loads(result["data"])
+            run = self.db.execute("SELECT coalesce(json_extract(payload,'$.run'),0) FROM events WHERE device=? AND session=? AND seq=?", (*key, result["seq"])).fetchone()[0]
             if module == "mpu":
-                received = [self.db.execute("SELECT count(*) FROM samples WHERE device=? AND session=? AND sensor=? AND valid=1", (*key, sensor)).fetchone()[0] for sensor in (1, 2)]
+                received = [self.db.execute("SELECT count(*) FROM samples WHERE device=? AND session=? AND sensor=? AND valid=1 AND run=?", (*key, sensor, run)).fetchone()[0] for sensor in (1, 2)]
                 if received != data["valid"]: issues.append("leituras MPU recebidas não correspondem ao resumo")
                 if data["missed_slots"] or data["buffer_drops"] or any(data["errors"]): issues.append("falhas ou perdas na aquisição MPU")
                 if not data["calibrated"]: issues.append("MPU sem calibração")
@@ -204,7 +220,7 @@ class Repository:
                 modules[module] = dict(data, received_valid=received, nominal_samples_per_sensor=nominal,
                                        coverage=[min(1, n / nominal) if nominal else None for n in received])
                 continue
-            trials = self.db.execute("SELECT training,outcome,latency_us FROM trials WHERE device=? AND session=? AND module=?", (*key, module)).fetchall()
+            trials = self.db.execute("SELECT training,outcome,latency_us FROM trials WHERE device=? AND session=? AND module=? AND run=?", (*key, module, run)).fetchall()
             measured = [t for t in trials if not t["training"]]
             counts = [sum(t["outcome"] == outcome for t in measured) for outcome in (0, 1, 2)]
             coherent = len(trials) == data["record_count"] and counts == [data["correct"], data["wrong"], data["omissions"]]
@@ -218,14 +234,14 @@ class Repository:
                 metrics.update(responses=data["correct"], anticipations=data["wrong"])
             else: metrics["accuracy_percent"] = 100 * data["correct"] / total if coherent and total else None
             modules[module] = metrics
-        if config and end and end["state"] == 3:
+        if config and config["kind"] != 7 and end and end["state"] == 3:
             wanted = {0: ["mpu"], 1: ["mot"], 2: ["rti"], 3: ["prm"], 4: ["pal"]}.get(config["kind"])
             if wanted is None:
                 wanted = [m for i, m in enumerate(("mot", "rti", "prm", "pal")) if config["tests_mask"] & (1 << i)]
                 if config["kind"] == 6: wanted += ["mpu"]
             for module in wanted:
                 if module not in modules: issues.append(f"resumo de {module.upper()} ausente")
-        return dict(device=device, session=session, state=row["state"], configuration=config, timing=end,
+        return dict(device=device, session=session, patient_id=row["patient_id"], runs=self.test_runs_by_session(*key), state=row["state"], configuration=config, timing=end,
                     first_received_utc=row["received_first"], last_received_utc=row["received_last"],
                     quality=dict(complete=not issues, issues=issues, received_messages=len(seqs), expected_messages=expected),
                     modules=modules, protocol_label="Experimental adaptado; sem escores clínicos normativos")
@@ -246,8 +262,8 @@ class Repository:
         return [dict(row) for row in rows]
 
     def trial_details(self, device, session):
-        return [json.loads(row[0]) for row in self.db.execute(
-            "SELECT data FROM trials WHERE device=? AND session=? ORDER BY module,trial_index",
+        return [dict(json.loads(row[0]), run=row[1] or 1) for row in self.db.execute(
+            "SELECT data,run FROM trials WHERE device=? AND session=? ORDER BY run,module,trial_index",
             (device, session))]
 
     def sample_counts(self, device, session):
@@ -302,7 +318,7 @@ class Repository:
         with self.db:
             self.db.execute(
                 "INSERT INTO patient_devices(patient_id, device_id, associated_at) VALUES(?,?,?) "
-                "ON CONFLICT(patient_id, device_id) DO UPDATE SET associated_at=excluded.associated_at",
+                "ON CONFLICT(device_id) DO UPDATE SET patient_id=excluded.patient_id, associated_at=excluded.associated_at WHERE patient_devices.patient_id!=excluded.patient_id",
                 (patient_id, device_id, utc_now()))
 
     def disassociate_patient_device(self, patient_id, device_id):

@@ -101,7 +101,7 @@ class SqliteModelTests(unittest.TestCase):
         numeros = sorted(r["run_number"] for r in runs)
         self.assertEqual(numeros, [1, 1, 2])
 
-    def test_migracao_banco_versao_5_para_6(self):
+    def test_migracao_banco_versao_5_para_7(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "banco.sqlite3"
             # Banco na versao 5 (sessoes ja tem patient_id, sem test_runs)
@@ -129,7 +129,7 @@ class SqliteModelTests(unittest.TestCase):
             repo = Repository(path)
             try:
                 # A migracao cria a tabela test_runs
-                self.assertEqual(repo.db.execute("PRAGMA user_version").fetchone()[0], 6)
+                self.assertEqual(repo.db.execute("PRAGMA user_version").fetchone()[0], 7)
                 tabela = repo.db.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name='test_runs'").fetchone()
                 self.assertIsNotNone(tabela)

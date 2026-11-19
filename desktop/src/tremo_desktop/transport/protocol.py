@@ -70,6 +70,7 @@ def decode(topic, payload):
         e = json.loads(payload, object_pairs_hook=_unique_object, parse_float=_finite_float,
                        parse_constant=lambda _: (_ for _ in ()).throw(InvalidMessage("número não finito")))
         fields(e, ("v", "device", "session", "seq", "type", "t_us", "data"))
+        integer(e.get("run", 0), 0, 2**32-1)
         if type(e["v"]) is not int or e["v"] != 1:
             raise InvalidMessage("versão não suportada")
         for key in ("device", "session"):
@@ -84,12 +85,18 @@ def decode(topic, payload):
         d, kind = e["data"], e["type"]
         if kind == "start":
             fields(d, ("kind", "duration_ms", "sample_ms", "tests_mask", "tremor_first", "protocol"))
-            integer(d["duration_ms"]); integer(d["sample_ms"]); integer(d["kind"], 0, 6); integer(d["tests_mask"], 1, 15); boolean(d["tremor_first"])
+            if d.get("patient_id", "") != "" and not valid_patient(d["patient_id"]):
+                raise InvalidMessage("identificador do paciente inválido")
+            integer(d["duration_ms"]); integer(d["sample_ms"]); integer(d["kind"], 0, 7); integer(d["tests_mask"], 1, 15); boolean(d["tremor_first"])
             for option in ("mot_mpu", "cognitive_mpu"):
                 if option in d:
                     boolean(d[option])
             if e["seq"] != 0 or d["duration_ms"] not in (30000, 60000) or d["sample_ms"] not in (20, 40) or d["protocol"] != "tremo-adaptado-v1":
                 raise InvalidMessage("configuração inválida")
+        elif kind == "test_start":
+            fields(d, ("module",))
+            if d["module"] not in MODULES[:4] or not e.get("run"):
+                raise InvalidMessage("início de teste inválido")
         elif kind in ("state", "end"):
             fields(d, ("state", "active_us", "paused_us", "pauses", "tx_dropped"))
             integer(d["state"], 1, 5)
@@ -172,9 +179,15 @@ def decode(topic, payload):
         raise InvalidMessage("mensagem não corresponde ao contrato") from exc
 
 
+def valid_patient(value):
+    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,16}", value) is not None
+
+
 def encode_command(device, command, data):
     """Codifica um comando para publicação no tópico de comandos."""
-    return dict(v=2, device=device, command=command, data=data, t_us=0)
+    if not HEX.fullmatch(device) or command not in (COMMAND_ASSOCIATE, COMMAND_DISASSOCIATE) or not valid_patient(data.get("patient_id")):
+        raise InvalidMessage("Dispositivo, comando ou paciente inválido")
+    return dict(v=2, device=device, command=command, data={"patient_id": data["patient_id"]})
 
 
 def encode_confirmation(device, confirmation, status, data=None):
@@ -199,12 +212,20 @@ def decode_command(topic, payload):
             raise InvalidMessage("versão não suportada")
         if not isinstance(e["device"], str) or not HEX.fullmatch(e["device"]):
             raise InvalidMessage("identificador inválido")
-        if e["confirmation"] not in (CONFIRM_ASSOCIATION, CONFIRM_DISASSOCIATION):
+        if topic != topic_confirmations(e["device"]):
+            raise InvalidMessage("dispositivo diverge do tópico")
+        if e["confirmation"] not in (CONFIRM_ASSOCIATION, CONFIRM_DISASSOCIATION, "device_state"):
             raise InvalidMessage("confirmação desconhecida")
-        if e["status"] not in (ASSOC_STATUS_OK, ASSOC_STATUS_ERROR, ASSOC_STATUS_ALREADY, ASSOC_STATUS_NOT_ASSOCIATED):
+        offline = e["confirmation"] == "device_state" and e["status"] == "offline"
+        if not offline and e["status"] not in (ASSOC_STATUS_OK, ASSOC_STATUS_ERROR, ASSOC_STATUS_ALREADY, ASSOC_STATUS_NOT_ASSOCIATED):
             raise InvalidMessage("status inválido")
         if "data" in e and not isinstance(e["data"], dict):
             raise InvalidMessage("dados devem ser um objeto")
+        if "firmware" in e.get("data", {}) and not isinstance(e["data"]["firmware"], str):
+            raise InvalidMessage("versão de firmware inválida")
+        patient = e.get("data", {}).get("patient_id")
+        if not valid_patient(patient) and not (e["confirmation"] == "device_state" and patient == ""):
+            raise InvalidMessage("paciente inválido")
         return e
     except InvalidMessage:
         raise

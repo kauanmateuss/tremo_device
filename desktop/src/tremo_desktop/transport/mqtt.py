@@ -1,15 +1,17 @@
 """Coletor independente da GUI. Uma thread executa MQTT e transacoes curtas.
 
 Suporta comunicacao bidirecional:
-- assina t_remo/v1/devices/+/events (telemetria da placa)
-- assina t_remo/v1/devices/+/confirmations (confirmacoes da placa)
-- publica em t_remo/v1/devices/<id>/commands (comandos para a placa)
+- assina tremo/v1/devices/+/events (telemetria da placa)
+- assina tremo/v1/devices/+/confirmations (confirmacoes da placa)
+- publica em tremo/v1/devices/<id>/commands (comandos para a placa)
 """
+from pathlib import Path
+from tremo_desktop.storage.repository import Repository
 import logging
 import json
 from tremo_desktop.services.ingestion import Ingestion
 from tremo_desktop.transport.protocol import (decode_command, InvalidMessage,
-    topic_commands, topic_confirmations, TOPIC_EVENTS)
+    topic_commands)
 
 LOG = logging.getLogger(__name__)
 TOPIC_EVENTS_WILDCARD = "tremo/v1/devices/+/events"
@@ -25,7 +27,8 @@ class Collector:
                                  clean_session=False, protocol=mqtt.MQTTv311,
                                  manual_ack=True)
         self.client = client
-        self.ingestion = Ingestion(repository)
+        self.path = repository if isinstance(repository, Path) else None
+        self.ingestion = None if self.path else Ingestion(repository)
         self.on_confirmation = on_confirmation
         self.failure = None
         if username:
@@ -45,11 +48,7 @@ class Collector:
             self._fail(f"Broker recusou conexao: {reason_code}")
             return
         # Assina telemetria e confirmacoes com wildcard de dispositivo.
-        result, _ = client.subscribe(TOPIC_EVENTS_WILDCARD, qos=1)
-        if result != 0:
-            self._fail("Nao foi possível solicitar a assinatura MQTT de eventos")
-            return
-        result, _ = client.subscribe(TOPIC_CONFIRMATIONS_WILDCARD, qos=1)
+        result, _ = client.subscribe([(TOPIC_EVENTS_WILDCARD, 1), (TOPIC_CONFIRMATIONS_WILDCARD, 1)])
         if result != 0:
             self._fail("Nao foi possível solicitar a assinatura MQTT de confirmacoes")
 
@@ -61,24 +60,29 @@ class Collector:
         LOG.info("Coletor pronto: assinaturas QoS 1 ativas em eventos e confirmacoes")
 
     def _disconnected(self, client, userdata, flags, reason_code, properties):
+        if self.path and self.ingestion:
+            self.ingestion.repository.close()
+            self.ingestion = None
         if reason_code.is_failure:
             LOG.warning("Conexao interrompida; aguardando reconexao automatica")
 
     def _message(self, client, userdata, message):
         # Em erro de disco/banco, a excecao encerra o loop sem PUBACK. Com a
         # sessao persistente, o broker pode reenviar ao reiniciar este coletor.
-        status = self.ingestion.receive(message.topic, message.payload, message.qos)
-        if status == "rejected":
-            LOG.warning("Mensagem rejeitada; motivo registrado em rejected_messages")
-        # Tenta processar como confirmacao se nao foi ingestao de evento.
-        if status in ("stored", "duplicate", "rejected"):
+        if self.ingestion is None:
+            self.ingestion = Ingestion(Repository(self.path))
+        if message.topic.endswith("/confirmations"):
             try:
+                if message.qos != 1:
+                    raise InvalidMessage("confirmação precisa usar QoS 1")
                 confirmation = decode_command(message.topic, message.payload)
+                self.ingestion.process_confirmation(confirmation)
                 if self.on_confirmation:
                     self.on_confirmation(confirmation)
-            except InvalidMessage:
-                # Nao e uma confirmacao; pode ser evento ja processado acima.
-                pass
+            except InvalidMessage as exc:
+                self.ingestion.repository.reject(message.topic, message.payload, exc)
+        else:
+            self.ingestion.receive(message.topic, message.payload, message.qos)
         if message.qos == 1:
             result = client.ack(message.mid, message.qos)
             if result != 0:
@@ -87,7 +91,7 @@ class Collector:
     def publish_command(self, device, command, data):
         """Publica um comando para o dispositivo especificado."""
         from tremo_desktop.transport.protocol import encode_command
-        payload = json.dumps(encode_command(device, command, data)).encode()
+        payload = json.dumps(encode_command(device, command, data), separators=(",", ":")).encode()
         topic = topic_commands(device)
         result, mid = self.client.publish(topic, payload, qos=1)
         if result != 0:

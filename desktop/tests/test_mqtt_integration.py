@@ -25,6 +25,51 @@ def until(check, seconds=15):
 
 @unittest.skipUnless(os.getenv("TREMO_TEST_MQTT") == "1", "defina TREMO_TEST_MQTT=1 para usar Mosquitto local")
 class BrokerIntegration(unittest.TestCase):
+    @unittest.skipUnless(os.getenv("TREMO_TEST_PORT"), "requer broker isolado")
+    def test_commands_and_confirmations(self):
+        import queue
+        import paho.mqtt.client as mqtt
+        from tremo_desktop.storage.repository import Repository
+        from tremo_desktop.transport.mqtt import Collector
+        from tremo_desktop.transport.protocol import topic_commands, topic_confirmations
+
+        port = int(os.environ["TREMO_TEST_PORT"])
+        device = "0123456789abcdef"
+        received = queue.Queue()
+        board = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        board.on_message = lambda client, userdata, message: received.put(json.loads(message.payload))
+        board.connect("127.0.0.1", port)
+        board.subscribe(topic_commands(device), qos=1)
+        board.loop_start()
+        self.addCleanup(board.loop_stop)
+        self.addCleanup(board.disconnect)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "associacoes.sqlite3"
+            repository = Repository(path)
+            self.addCleanup(repository.close)
+            collector = Collector(path, client=mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, manual_ack=True))
+            collector.client.connect("127.0.0.1", port)
+            collector.client.loop_start()
+            try:
+                until(collector.client.is_connected)
+                for action, patient in [("associate_patient", "PAC-A"), ("associate_patient", "PAC-B"),
+                                        ("disassociate_patient", "PAC-B")]:
+                    previous = repository.device_patients(device)
+                    collector.publish_command(device, action, {"patient_id": patient})
+                    command = received.get(timeout=5)
+                    self.assertEqual(command["data"]["patient_id"], patient)
+                    self.assertEqual(previous, repository.device_patients(device))
+                    associate = action == "associate_patient"
+                    confirmation = dict(v=2, device=device, status="ok", data=command["data"],
+                        confirmation="association_confirmed" if associate else "disassociation_confirmed")
+                    board.publish(topic_confirmations(device), json.dumps(confirmation), qos=1)
+                    until(lambda: [r["patient_id"] for r in repository.device_patients(device)]
+                          == ([patient] if associate else []))
+                self.assertEqual(repository.db.execute("SELECT count(*) FROM rejected_messages").fetchone()[0], 0)
+            finally:
+                collector.client.disconnect()
+                collector.client.loop_stop()
+
     def test_delivery_duplicates_offline_and_quarantine(self):
         import paho.mqtt.client as mqtt
         # Neste perfil, o broker não pode receber SIGTERM do executor do teste.

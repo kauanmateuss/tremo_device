@@ -72,6 +72,24 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaises(InvalidMessage): self.put(repeated)
         self.assertEqual(self.repo.db.execute("SELECT count(*) FROM events").fetchone()[0], 2)
 
+    def test_repeated_runs_keep_patient_and_trials(self):
+        start = event()
+        start["data"].update(kind=7, patient_id="PAC-A")
+        self.put(start)
+        self.repo.create_patient("PAC-B")
+        self.repo.associate_patient_device("PAC-B", DEVICE)
+        for run in (1, 2):
+            seq = 3 * run - 2
+            self.put(dict(event("test_start", seq, {"module": "mot"}), run=run))
+            self.put(dict(trial(0), seq=seq + 1, run=run))
+            self.put(dict(result(seq + 2, records=1, correct=1, wrong=0), run=run))
+        self.put(end(7))
+        report = self.repo.overview(DEVICE, SESSION)
+        self.assertTrue(report["quality"]["complete"])
+        self.assertEqual(report["patient_id"], "PAC-A")
+        self.assertEqual([r["run_number"] for r in report["runs"]], [1, 2])
+        self.assertEqual([t["run"] for t in self.repo.trial_details(DEVICE, SESSION)], [1, 2])
+
     def test_metrics_exclude_training_and_detect_missing(self):
         for e in (event(), trial(0, True), trial(1), trial(2, outcome=1), result(4), end(5)):
             self.put(e)
