@@ -52,6 +52,19 @@ class SettingsPanel(QWidget):
         form = QFormLayout()
         form.addRow("Endereço do broker", self.host)
         form.addRow("Porta", self.port)
+        self.broker_user = QLineEdit()
+        self.broker_password = QLineEdit()
+        self.broker_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.broker_password.setPlaceholderText("Usada somente nesta execução")
+        form.addRow("Usuário MQTT", self.broker_user)
+        form.addRow("Senha MQTT", self.broker_password)
+        self.host.textChanged.connect(self._clear_credentials)
+        self.port.valueChanged.connect(self._clear_credentials)
+        environment_host = os.getenv("TREMO_MQTT_HOST", "192.168.1.215")
+        environment_port = int(os.getenv("TREMO_MQTT_PORT", "1883"))
+        if (self.host.text(), self.port.value()) == (environment_host, environment_port):
+            self.broker_user.setText(os.getenv("TREMO_MQTT_USER", ""))
+            self.broker_password.setText(os.getenv("TREMO_MQTT_PASSWORD", ""))
         box.addLayout(form)
         self.network = label("")
         box.addWidget(self.network)
@@ -189,6 +202,10 @@ class SettingsPanel(QWidget):
         self.connection_timer.start(1000)
         self._update_actions()
 
+    def _clear_credentials(self):
+        self.broker_user.clear()
+        self.broker_password.clear()
+
     def _change_broker(self):
         host = self.host.text().strip()
         if not host or any(c.isspace() for c in host) or "/" in host:
@@ -314,7 +331,10 @@ class SettingsPanel(QWidget):
 
     def _update_actions(self):
         connected = bool(self.collector and self.collector.client.is_connected())
-        self.network.setText(("Conectado" if connected else "Desconectado") if self.collector else "Consulta local")
+        status = "Consulta local"
+        if self.collector:
+            status = "Conectado" if connected else str(self.collector.failure or "Desconectado")
+        self.network.setText(status)
         self.reconnect.setEnabled(bool(self.collector) and not self.pending)
         target = self.mpu_device.currentData()
         self.apply_mpu.setEnabled(bool(connected and not self.pending and target and self.device_states.get(target) != "offline"))

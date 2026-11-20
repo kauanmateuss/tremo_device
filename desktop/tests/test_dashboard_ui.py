@@ -91,6 +91,16 @@ class DashboardUITests(unittest.TestCase):
         self.wait_for(lambda: "00000000000000af · 0.3-teste" in self.window.about.firmware.text())
         self.assertIn("00000000000000bf · versão não informada", self.window.about.firmware.text())
 
+    def test_broker_credentials_are_cleared_for_another_endpoint(self):
+        settings = self.window.settings
+        for change in (lambda: settings.host.setText("broker.test.invalid"),
+                       lambda: settings.port.setValue(1884)):
+            settings.broker_user.setText("usuario-teste")
+            settings.broker_password.setText("senha-teste")
+            change()
+            self.assertEqual(settings.broker_user.text(), "")
+            self.assertEqual(settings.broker_password.text(), "")
+
     def test_compare_reference_across_filters(self):
         w = self.window
         w.pages.setCurrentIndex(1)

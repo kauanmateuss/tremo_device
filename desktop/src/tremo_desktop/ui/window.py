@@ -77,11 +77,9 @@ class DashboardWindow(QMainWindow):
             self.collector.client.disconnect()
             self.collector.client.loop_stop()
         database_id = sha256(os.fsencode(self.path)).hexdigest()[:16]
-        default_broker = (os.getenv("TREMO_MQTT_HOST", "192.168.1.215"), int(os.getenv("TREMO_MQTT_PORT", "1883")))
-        use_credentials = (host, port) == default_broker
         self.collector = Collector(self.path, client_id=f"tremo-gui-{database_id}",
-            username=os.getenv("TREMO_MQTT_USER") if use_credentials else None,
-            password=os.getenv("TREMO_MQTT_PASSWORD") if use_credentials else None,
+            username=self.settings.broker_user.text() or None,
+            password=self.settings.broker_password.text() or None,
             on_confirmation=self.confirmation_received.emit)
         self.settings.collector = self.collector
         self.collector.client.connect_async(host, port)
