@@ -1,46 +1,16 @@
-# Telemetria MQTT — etapa de integração
-
-Objetivo: transmitir sessões, respostas dos quatro testes e amostras dos dois MPUs
-para o Mosquitto, preservando a FSM e os módulos de avaliação.
+# Telemetria MQTT
 
 ## Arquitetura
 
-`session` e os testes produzem eventos → `telemetry` mantém uma fila em RAM →
-`communication` publica via Wi-Fi/MQTT. `main.c` continua apenas inicializando e
-atualizando a aplicação. A rede usa a arquitetura `poll` do Pico SDK; `app.c`
-suspende a conexão e o processamento da rede durante os testes cognitivos,
-retomando nos resultados. Não há aquisição MPU simultânea aos testes cognitivos.
-O impacto real do Wi-Fi na aquisição MPU ainda precisa ser medido na placa.
+A tarefa de sessão produz eventos e a tarefa de rede os publica via Wi-Fi/MQTT a partir de uma fila em RAM. O atendimento da rede ocorre em paralelo à aquisição e às avaliações. Consulte a [integração com FreeRTOS](rede-freertos.md).
 
-Na tela **PRONTO**, depois da calibração, confira a linha de rede. Para ver a
-sessão ao vivo, aguarde **MQTT CONECTADO** antes de apertar A. **REDE AUSENTE**,
-**VER SENHA WIFI**, **WIFI SEM IP** e **AGUARDE MQTT** distinguem as etapas da
-conexão. É possível iniciar offline. Durante a calibração e aquisição, o firmware
-só atende uma conexão MQTT já estabelecida. Se a conexão cair ou não existir,
-adia novas tentativas até sair dessa fase; mensagens sem PUBACK continuam na
-fila limitada. Nesse caso parte das amostras pode não chegar ao computador.
+Para acompanhar uma avaliação ao vivo, aguarde a conexão do coletor e da placa ao broker. A tela **PRONTO** informa o estado da rede. A placa permite iniciar offline, mas a capacidade da fila limita a quantidade de eventos que podem ser recuperados.
 
-MQTT usa **QoS 1**, que admite reenvio: a mensagem sai da fila somente após PUBACK.
-A identidade `(device, session, seq)` permite eliminar duplicatas no computador.
-PUBACK confirma recepção pelo broker, não gravação no SQLite. Não usamos `retain`.
+A telemetria usa QoS 1. O PUBACK confirma o recebimento pelo broker e libera a mensagem da fila. O coletor usa a identidade `(device, session, seq)` para reconhecer reenvios.
 
-## Configurar e compilar
+## Configuração da rede
 
-Na raiz do projeto:
-
-```sh
-cp config/network_config.example.h config/network_config.h
-# Preencher SSID/senha da rede de 2,4 GHz e autenticação MQTT, se exigida.
-cmake -S . -B build -DTREMO_MQTT=ON -DTREMO_NETWORK_CONFIG_DIR="$PWD/config"
-cmake --build build -j 4
-python3 tests/run_host_tests.py
-```
-
-Endereço inicial: `192.168.1.215:1883`. O arquivo local é ignorado pelo Git.
-Use IPv4 numérico. Sem SSID, a aplicação continua no modo USB/OLED; para compilar
-sem rede use `-DTREMO_MQTT=OFF`. Grave `build/tremo_device.uf2` via BOOTSEL.
-Credenciais compiladas ficam no firmware; não compartilhe o UF2 configurado.
-Esta etapa usa TCP sem TLS, para a rede local de desenvolvimento.
+Siga as [instruções de compilação](../README.md). No arquivo local `config/network_config.h`, informe o IPv4 do broker acessível pela placa e a porta TCP (por padrão, 1883). O firmware usa Wi-Fi de 2,4 GHz e MQTT sem TLS. As credenciais são incorporadas ao UF2 durante a compilação. Para compilar apenas com USB e OLED, use `-DTREMO_MQTT=OFF`.
 
 ## Contrato v1
 
@@ -66,7 +36,7 @@ Tentativas de treino ficam identificadas e não entram nas métricas de avaliaç
 
 ## Limites e critérios de aceitação
 
-- Fila fixa de 96 mensagens de até 767 caracteres; amostras usam até 16 vagas,
+- Fila fixa de 96 mensagens; amostras usam até 16 vagas,
   reservando as demais para respostas, resultados e encerramentos. A fila é
   volátil: reset/apagamento da placa perde mensagens ainda não confirmadas.
 - Reconexão com espera progressiva, sem bloquear a FSM. Fila cheia descarta novos
@@ -76,7 +46,7 @@ Tentativas de treino ficam identificadas e não entram nas métricas de avaliaç
   limites de fila do broker. Persistência do Mosquitto em disco é necessária para
   sobreviver ao reinício do broker. Não há garantia de entrega infinita/offline.
 - Critérios automatizados: PUBACK controla remoção; desconexão conserva mensagem;
-  pausa cognitiva impede `poll`; timeout/reconexão preservam identidade; todos os
+  timeout/reconexão preservam identidade; todos os
   quatro testes geram JSON válido; mensagens repetidas não duplicam registros.
 - Critérios de bancada: conectar à rede, executar os quatro testes e MPU, conferir
   resumos no receptor, desligar/restaurar o broker e medir `missed_slots`, atrasos
