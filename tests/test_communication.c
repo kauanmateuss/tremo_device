@@ -67,6 +67,13 @@ err_t mqtt_publish(mqtt_client_t *c, const char *topic, const void *payload, uin
 static void connected(void) { network.connected = 1; connect_cb(&network, connect_arg, MQTT_CONNECT_ACCEPTED); }
 int main(void) {
     communication_init(); session_init(1); assert(session_begin(SESSION_MOT, 0));
+    link = CYW43_LINK_NOIP;
+    for (unsigned i = 0; i < 4; ++i) {
+        now += 15000000;
+        communication_update(COMM_NORMAL);
+        assert(communication_status() == COMM_WIFI_NO_IP && !joins && !connects);
+    }
+    link = CYW43_LINK_UP;
     communication_update(COMM_NORMAL); assert(connects == 1); connected();
     communication_update(COMM_NORMAL); assert(publishes == 1 && telemetry_pending() == 1);
     assert(strstr(previous, "abcdef0123456789"));

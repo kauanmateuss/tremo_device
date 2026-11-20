@@ -260,6 +260,8 @@ static void service_network(communication_mode_t mode) {
     }
     uint64_t now = time_us_64();
     int link = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
+    // O rádio já se associou. Mantenha o poll do lwIP enquanto o DHCP negocia o IP.
+    if (link == CYW43_LINK_NOIP) return;
     if (link != CYW43_LINK_UP) {
         if (now >= wifi_retry_us) {
             disconnect_client();
