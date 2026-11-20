@@ -101,14 +101,14 @@ static void move(unsigned axis, uint16_t value) {
 static void user_script(void *parameter) {
     (void)parameter;
     wait_app(APP_MENU);
-    move(0, 4095); press(5); wait_app(APP_DEVICE_INFO); press(5); wait_app(APP_INFO); // Configurações.
+    move(0, 4095); move(0, 4095); press(5); wait_app(APP_INFO); // Configurações.
     move(0, 4095); press(5); // MPU COG SIM.
     assert(session_config()->cognitive_mpu);
     press(6); wait_app(APP_MENU);
-    move(0, 4095); press(5); wait_app(APP_SESSIONS);
+    move(0, 0); press(5); wait_app(APP_SESSIONS);
     press(5); wait_app(APP_SESSION_ACTIVE);
     press(22); wait_app(APP_MENU);
-    move(0, 4095); press(5); wait_app(APP_COG_MENU);
+    move(0, 0); move(0, 0); press(5); wait_app(APP_COG_MENU);
     press(5); wait_app(APP_READY); // Preparo e calibração pelo fluxo real.
     press(5); wait_app(APP_MOT);
     assert(mot_get_state() == MOT_INSTRUCTIONS);

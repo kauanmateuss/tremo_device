@@ -35,7 +35,13 @@ static const app_state_t cognitive_states[] = {APP_MOT, APP_RTI, APP_PRM, APP_PA
 static communication_status_t ready_network;
 static char device_id_str[17];
 
-static void show_device_menu(void);
+enum { MENU_TREMOR, MENU_COGNITIVE, MENU_FULL, MENU_CONFIG, MENU_SESSIONS, MENU_COUNT };
+static const char *const menu_labels[MENU_COUNT] = {
+    [MENU_TREMOR] = "TREMORES", [MENU_COGNITIVE] = "COGNITIVA",
+    [MENU_FULL] = "AVAL COMPLETA", [MENU_CONFIG] = "CONFIGURACOES", [MENU_SESSIONS] = "SESSOES"
+};
+static const char *const cognitive_labels[] = {"MOT", "RTI", "PRM", "PAL", "BATERIA"};
+#define COGNITIVE_COUNT (sizeof(cognitive_labels) / sizeof(cognitive_labels[0]))
 static void show_device_info(void);
 static void show_sessions(void);
 static void show_session_active(void);
@@ -58,17 +64,25 @@ static uint32_t now_ms(void) {
     return to_ms_since_boot(get_absolute_time());
 }
 
+static void show_options(const char *title, const char *const options[], unsigned count,
+                         unsigned selected, const char *footer) {
+    char rows[5][17]; // Cinco opções entre o cabeçalho e o rodapé do OLED.
+    _Static_assert(MENU_COUNT <= 5 && COGNITIVE_COUNT <= 5, "Menu excede o OLED");
+    const char *lines[8] = {title, ""};
+    for (unsigned i = 0; i < count; ++i) {
+        snprintf(rows[i], sizeof(rows[i]), "%c%s", selected == i ? '-' : ' ', options[i]);
+        lines[i + 2] = rows[i];
+    }
+    lines[count + 2] = footer;
+    display_show_lines(lines, count + 3);
+}
+
 static void show_menu(void) {
-    show_device_menu();
+    show_options("MENU PRINCIPAL", menu_labels, MENU_COUNT, menu_option, "A SELECIONAR");
 }
 
 static void show_cognitive_menu(void) {
-    const char *options[] = {"MOT", "RTI", "PRM", "PAL", "BATERIA", "TREMORES"};
-    char rows[6][16];
-    const char *lines[] = {"AVAL INDIVIDUAL", rows[0], rows[1], rows[2], rows[3], rows[4], rows[5], "A OK B VOLTAR"};
-    for (unsigned int i = 0; i < 6; ++i)
-        snprintf(rows[i], sizeof(rows[i]), "%c%s", cognitive_option == i ? '-' : ' ', options[i]);
-    display_show_lines(lines, 8);
+    show_options("AVAL COGNITIVA", cognitive_labels, COGNITIVE_COUNT, cognitive_option, "A OK B VOLTAR");
 }
 
 static void show_results(void) {
@@ -94,18 +108,9 @@ static void show_config(void) {
     snprintf(rows[6], sizeof(rows[6]), "MPU %s", c->tremor_first ? "ANTES" : "DEPOIS");
     snprintf(rows[7], sizeof(rows[7]), "MPU COG %s", c->cognitive_mpu ? "SIM" : "NAO");
     // Janela de três opções mantém instruções visíveis no OLED.
-    const char *lines[] = {"CONFIGURACOES", rows[config_option], rows[(config_option + 1) % 8], rows[(config_option + 2) % 8], "ALTERA PRIMEIRA", "A ALTERAR", "B MENU", "CLIQUE PAUSA"};
+    const char *lines[] = {"CONFIGURACOES", rows[config_option], rows[(config_option + 1) % 8], rows[(config_option + 2) % 8], "ALTERA PRIMEIRA", "A ALTERAR", "B MENU", "JOY INFO PLACA"};
     display_show_lines(lines, 8);
 }
-static void show_device_menu(void) {
-    const char *options[] = {"AVAL COMPLETA", "AVAL INDIVIDUAL", "SESSOES", "INFO DA PLACA"};
-    char rows[4][24];
-    const char *lines[] = {"MENU PRINCIPAL", "", rows[0], rows[1], rows[2], rows[3], "", "A OK  B VOLTAR"};
-    for (unsigned int i = 0; i < 4; ++i)
-        snprintf(rows[i], sizeof(rows[i]), "%c%s", menu_option == i ? '-' : ' ', options[i]);
-    display_show_lines(lines, 8);
-}
-
 static void show_device_info(void) {
     char rows[8][24];
     snprintf(rows[0], sizeof(rows[0]), "%s", device_id_str);
@@ -128,7 +133,7 @@ static void show_device_info(void) {
     snprintf(rows[2], sizeof(rows[2]), "%s", net_str);
     snprintf(rows[3], sizeof(rows[3]), "MPU1: %s", monitoring_sensor_ready(0) ? "OK" : "FALHA");
     snprintf(rows[4], sizeof(rows[4]), "MPU2: %s", monitoring_sensor_ready(1) ? "OK" : "FALHA");
-    const char *lines[] = {"INFO DISPOSITIVO", rows[0], rows[1], rows[2], rows[3], rows[4], "A CONFIGURAR", "B VOLTAR"};
+    const char *lines[] = {"INFO DISPOSITIVO", rows[0], rows[1], rows[2], rows[3], rows[4], "", "B VOLTAR"};
     display_show_lines(lines, 8);
 }
 
@@ -448,14 +453,21 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         if (now - welcome_started_ms >= WELCOME_MS) enter_state(APP_MENU);
         break;
     case APP_MENU:
-        if (event == CONTROL_UP) { menu_option = (menu_option + 3) % 4; show_menu(); }
-        else if (event == CONTROL_DOWN) { menu_option = (menu_option + 1) % 4; show_menu(); }
+        if (event == CONTROL_UP) { menu_option = (menu_option + MENU_COUNT - 1) % MENU_COUNT; show_menu(); }
+        else if (event == CONTROL_DOWN) { menu_option = (menu_option + 1) % MENU_COUNT; show_menu(); }
         else if (event == CONTROL_CONFIRM) {
-            if (menu_option <= 1 && !session_is_open()) enter_state(APP_SESSIONS);
-            else if (menu_option == 0) launch_evaluation(true);
-            else if (menu_option == 1) enter_state(APP_COG_MENU);
-            else if (menu_option == 2) enter_state(session_is_open() ? APP_SESSION_ACTIVE : APP_SESSIONS);
-            else if (menu_option == 3) enter_state(APP_DEVICE_INFO);
+            if ((menu_option == MENU_TREMOR || menu_option == MENU_COGNITIVE || menu_option == MENU_FULL)
+                    && !session_is_open()) {
+                enter_state(APP_SESSIONS);
+                break;
+            }
+            switch (menu_option) {
+            case MENU_TREMOR: enter_state(APP_INSTRUCTIONS); break;
+            case MENU_COGNITIVE: enter_state(APP_COG_MENU); break;
+            case MENU_FULL: launch_evaluation(true); break;
+            case MENU_CONFIG: enter_state(APP_INFO); break;
+            case MENU_SESSIONS: enter_state(session_is_open() ? APP_SESSION_ACTIVE : APP_SESSIONS); break;
+            }
         }
         break;
     case APP_INSTRUCTIONS:
@@ -539,16 +551,15 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
         break;
     case APP_COG_MENU:
         if (event == CONTROL_BACK) enter_state(APP_MENU);
-        else if (event == CONTROL_UP) { cognitive_option = (cognitive_option + 5) % 6; show_cognitive_menu(); }
-        else if (event == CONTROL_DOWN) { cognitive_option = (cognitive_option + 1) % 6; show_cognitive_menu(); }
+        else if (event == CONTROL_UP) { cognitive_option = (cognitive_option + COGNITIVE_COUNT - 1) % COGNITIVE_COUNT; show_cognitive_menu(); }
+        else if (event == CONTROL_DOWN) { cognitive_option = (cognitive_option + 1) % COGNITIVE_COUNT; show_cognitive_menu(); }
         else if (event == CONTROL_CONFIRM) {
             if (cognitive_option < 4) {
                 const app_state_t errors[] = {APP_MOT_ERROR, APP_RTI_ERROR, APP_PRM_ERROR, APP_PAL_ERROR};
                 if (matrix_ready) launch_cognitive(cognitive_option);
                 else enter_state(errors[cognitive_option]);
             }
-            else if (cognitive_option == 4) launch_evaluation(false);
-            else enter_state(APP_INSTRUCTIONS);
+            else launch_evaluation(false);
         }
         break;
     case APP_COG_UNAVAILABLE:
@@ -573,14 +584,14 @@ static void app_step(control_event_t event, control_button_state_t button, uint6
             else if (config_option == 6) c.tremor_first = !c.tremor_first;
             else c.cognitive_mpu = !c.cognitive_mpu;
             session_configure(c); show_config();
-        } else if (event == CONTROL_BACK) enter_state(APP_MENU);
+        } else if (event == CONTROL_PAUSE) enter_state(APP_DEVICE_INFO);
+        else if (event == CONTROL_BACK) enter_state(APP_MENU);
         break;
     case APP_DEVICE_INFO:
         if (event == CONTROL_NONE && now - last_display_ms >= 1000) {
             last_display_ms = now;
             show_device_info();
-        } else if (event == CONTROL_CONFIRM) enter_state(APP_INFO);
-        else if (event == CONTROL_BACK) enter_state(APP_MENU);
+        } else if (event == CONTROL_BACK) enter_state(APP_INFO);
         break;
     case APP_SESSIONS:
         if (event == CONTROL_CONFIRM && begin_session()) {

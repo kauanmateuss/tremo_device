@@ -103,15 +103,10 @@ static void open_session(void) {
     step(CONTROL_CONFIRM, 5);
     assert(app_get_state() == APP_SESSION_ACTIVE);
     step(CONTROL_PAUSE, 5);
-    // Volta ao primeiro item do menu.
-    step(CONTROL_UP, 5); step(CONTROL_UP, 5);
-}
-static void select_tremor(void) {
-    choose("AVAL INDIVIDUAL");
-    choose("TREMORES");
+    assert(app_get_state() == APP_MENU);
 }
 static void start_from_menu(void) {
-    select_tremor(); assert(app_get_state() == APP_INSTRUCTIONS);
+    choose("TREMORES"); assert(app_get_state() == APP_INSTRUCTIONS);
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_PREPARING);
     step(CONTROL_NONE, 5); finish_calibration();
     unsigned int before = reads;
@@ -156,7 +151,7 @@ static void exercise_evaluations(void) {
         assert(session_configure(c));
         open_session();
         if (mode < 2) choose("AVAL COMPLETA");
-        else { choose("AVAL INDIVIDUAL"); choose("BATERIA"); }
+        else { choose("COGNITIVA"); choose("BATERIA"); }
         assert(app_get_state() == APP_EVAL_SETUP);
         uint64_t id = session_current()->id;
         step(CONTROL_CONFIRM, 5);
@@ -189,13 +184,13 @@ static void exercise_evaluations(void) {
 static void exercise_mot_capture(void) {
     matrix_ok = true; healthy[0] = healthy[1] = true;
     app_init(); step(CONTROL_NONE, 2000);
-    choose("INFO DA PLACA"); step(CONTROL_CONFIRM, 5); // Configurações.
+    choose("CONFIGURACOES"); // Configurações.
     step(CONTROL_UP, 5);
     assert(strcmp(screen[1], "MPU COG NAO") == 0);
     step(CONTROL_CONFIRM, 5);
     assert(session_config()->cognitive_mpu && strcmp(screen[1], "MPU COG SIM") == 0);
     step(CONTROL_BACK, 5);
-    open_session(); choose("AVAL INDIVIDUAL");
+    open_session(); choose("COGNITIVA");
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_PREPARING);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 5); finish_calibration();
@@ -228,7 +223,7 @@ static void exercise_mot_capture(void) {
     session_config_t c = *session_config(); c.cognitive_mpu = true; c.tests_mask = 1;
     assert(session_configure(c));
     open_session();
-    choose("AVAL INDIVIDUAL"); choose("BATERIA"); step(CONTROL_CONFIRM, 5);
+    choose("COGNITIVA"); choose("BATERIA"); step(CONTROL_CONFIRM, 5);
     assert(app_get_state() == APP_PREPARING);
     step(CONTROL_NONE, 5); finish_calibration(); step(CONTROL_CONFIRM, 5);
     assert(monitoring_result()->session_id == evaluation_current()->session_id);
@@ -244,7 +239,7 @@ static void exercise_memory_capture(void) {
         session_config_t c = *session_config(); c.cognitive_mpu = true;
         assert(session_configure(c));
         open_session();
-        step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+        choose("COGNITIVA");
         for (unsigned i = 0; i < test; ++i) step(CONTROL_DOWN, 5);
         step(CONTROL_CONFIRM, 5);
         assert(app_get_state() == APP_PREPARING);
@@ -277,14 +272,19 @@ int main(void) {
     step(CONTROL_NONE, 1); assert(app_get_state() == APP_MENU);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_MENU);
     assert(reads == boot_reads); // Nada de aquisição no menu.
+    step(CONTROL_UP, 5); assert(!strcmp(screen[6], "-SESSOES"));
+    step(CONTROL_DOWN, 5); assert(!strcmp(screen[2], "-TREMORES"));
+    step(CONTROL_CONFIRM, 5);
+    assert(app_get_state() == APP_SESSIONS && !session_is_open());
+    step(CONTROL_BACK, 5);
     choose("AVAL COMPLETA");
     assert(app_get_state() == APP_SESSIONS && session_current()->id == 0);
     step(CONTROL_PAUSE, 5);
-    choose("AVAL INDIVIDUAL");
+    choose("COGNITIVA");
     assert(app_get_state() == APP_SESSIONS && session_current()->id == 0);
     step(CONTROL_PAUSE, 5);
     open_session();
-    select_tremor(); assert(app_get_state() == APP_INSTRUCTIONS);
+    choose("TREMORES"); assert(app_get_state() == APP_INSTRUCTIONS);
     step(CONTROL_CONFIRM, 5); step(CONTROL_NONE, 5);
     assert(app_get_state() == APP_SENSOR_ERROR);
     step(CONTROL_NONE, 100); assert(app_get_state() == APP_SENSOR_ERROR);
@@ -293,12 +293,12 @@ int main(void) {
     finish_calibration();
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_INSTRUCTIONS);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_MENU);
-    // Todos os itens, incluindo a volta circular do joystick.
-    choose("INFO DA PLACA"); step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_INFO);
+    choose("CONFIGURACOES"); assert(app_get_state() == APP_INFO);
+    step(CONTROL_PAUSE, 5); assert(app_get_state() == APP_DEVICE_INFO);
+    step(CONTROL_BACK, 5); assert(app_get_state() == APP_INFO);
     step(CONTROL_BACK, 5);
-    choose("AVAL INDIVIDUAL"); assert(app_get_state() == APP_COG_MENU);
-    // A escolha anterior foi tremor.
-    step(CONTROL_DOWN, 5);
+    choose("COGNITIVA"); assert(app_get_state() == APP_COG_MENU);
+    assert(!strcmp(screen[2], "-MOT"));
     unsigned int before_mot = reads;
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_MOT);
     step(CONTROL_CONFIRM, 5); assert(mot_get_state() == MOT_STIMULUS);
@@ -404,7 +404,7 @@ int main(void) {
     assert(monitoring_result()->duration_ms == MONITORING_DURATION_MS);
     matrix_ok = false;
     app_init(); step(CONTROL_NONE, 2000); open_session();
-    step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
+    choose("COGNITIVA");
     step(CONTROL_CONFIRM, 5); assert(app_get_state() == APP_MOT_ERROR);
     step(CONTROL_BACK, 5); assert(app_get_state() == APP_COG_MENU);
     step(CONTROL_DOWN, 5); step(CONTROL_CONFIRM, 5);
@@ -423,7 +423,7 @@ int main(void) {
     step(CONTROL_CONFIRM, 5);
     assert(session_current()->id == session && session_is_open());
     step(CONTROL_PAUSE, 5);
-    choose("AVAL INDIVIDUAL");
+    choose("COGNITIVA");
     for (unsigned i = 0; i < 2; ++i) {
         choose("MOT"); complete_mot(); step(CONTROL_BACK, 5);
         assert(session_current()->id == session && session_current()->state == SESSION_RUNNING);

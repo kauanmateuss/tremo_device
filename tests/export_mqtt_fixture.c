@@ -26,7 +26,7 @@ int main(void) {
     step(CONTROL_CONFIRM, 5); complete_rti();
     step(CONTROL_CONFIRM, 5);
     assert(session_current()->state == SESSION_RUNNING);
-    step(CONTROL_BACK, 5); choose("AVAL INDIVIDUAL"); choose("MOT");
+    step(CONTROL_BACK, 5); choose("COGNITIVA"); choose("MOT");
     complete_mot(); step(CONTROL_BACK, 5);
     step(CONTROL_BACK, 5); choose("SESSOES");
     step(CONTROL_BACK, 5); step(CONTROL_CONFIRM, 5);
