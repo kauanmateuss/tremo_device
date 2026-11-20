@@ -41,14 +41,24 @@ de usar: a configuração de software não altera o endereço do sensor.
 
 ## Fluxo atual
 
-Ao ligar: inicializar periféricos → verificar sensores → boas-vindas → menu.
-O joystick seleciona, A confirma e B volta. As opções são tremores, cognitiva,
-completa e configurações/informações. Cognitiva abre o submenu MOT/RTI/PRM/PAL/bateria. MOT, RTI, PRM e PAL estão implementados;
-a bateria executa os testes selecionados e a avaliação completa inclui os tremores.
+Após verificar os sensores, a placa exibe as boas-vindas e abre o menu do OLED.
+Mova o joystick para cima ou para baixo e pressione A para selecionar.
 
-Para monitorar: instruções → A preparar → calibração imóvel → sensores OK → A iniciar → aquisição.
-Uma sessão dura 30 ou 60 segundos, conforme a configuração. B solicita interrupção; A confirma e B continua.
-A coleta continua durante a confirmação. Uma falha de sensor encerra a sessão.
+| Opção | O que abre |
+|---|---|
+| Tremores | Instruções para preparar e calibrar os dois MPUs e iniciar a coleta. |
+| Cognitiva | Testes MOT, RTI, PRM e PAL e a bateria dos testes habilitados. |
+| Aval completa | Sequência de tremores e testes cognitivos conforme a configuração da sessão. |
+| Configurações | Ajustes de coleta e avaliações. Pressione o joystick para consultar as informações da placa e B para voltar. |
+| Sessões | Abertura, consulta e encerramento da sessão do paciente. |
+
+Ao selecionar uma avaliação sem sessão aberta, o OLED mostra **Sessões**.
+Pressione A para iniciar a sessão, clique no joystick para voltar ao menu e selecione a avaliação.
+Ao terminar o teste, a sessão continua aberta. Para encerrá-la, entre em **Sessões**, pressione B e confirme com A.
+
+A coleta de tremores dura 30 ou 60 segundos, conforme a configuração da sessão.
+Durante a coleta, B solicita a interrupção. A confirma e B continua.
+A aquisição prossegue enquanto o dispositivo aguarda a confirmação. Uma falha de sensor encerra a coleta.
 
 - Leitura com intervalo alvo de 20 ou 40 ms; OLED atualizado a cada 200 ms.
 - Serial USB: CSV de aceleração (g) e giroscópio (graus/s), com timestamp.
